@@ -1,7 +1,7 @@
 # ADR-007: Screening: free filters, then one AI call per person and posting; the verdict in code
 
 ## Status
-Accepted 2026-11-13 at the phase 1 gate. Proposed 2026-11-12 and revised after three adversarial review cycles the same day: the shared-extraction design was replaced in cycle 1. The list-requirement rule and the eligibility rules offered are set in phase 2; the screening model is chosen in the `screening` slice, from its eval.
+Accepted 2026-11-13 at the phase 1 gate. Proposed 2026-11-12 and revised after three adversarial review cycles the same day: the shared-extraction design was replaced in cycle 1. At the phase 2 gate the owner accepted the list-requirement rule as written (rule 6) and all five eligibility rules, each off until turned on; the screening model is chosen in the `screening` slice, from its eval.
 
 ## Date
 2026-11-12
@@ -62,7 +62,7 @@ Accepted 2026-11-13 at the phase 1 gate. Proposed 2026-11-12 and revised after t
    | Label | "N of M must-haves shown", or "nice-to-haves" when those were the basis |
    | Rank | within a verdict, share, then place priority, then newest |
 
-6. **List requirements**, proposed for the owner to confirm in phase 2: a list in one sentence ("Go, PostgreSQL and Kafka") stays one requirement. It's met when every item is shown (or any one, for "one of"), partly met when some are, and not met when none are.
+6. **List requirements**, confirmed by the owner at the phase 2 gate: a list in one sentence ("Go, PostgreSQL and Kafka") stays one requirement. It's met when every item is shown (or any one, for "one of"), partly met when some are, and not met when none are.
 7. **When it runs:**
    - **Scheduled:** `screen:user` runs per person, coalesced as the limits table says.
    - **Interactive:** `screen:job` handles a pasted posting or a single re-screen in the interactive lane.

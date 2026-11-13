@@ -52,7 +52,7 @@ Each module gets its own spec (`docs/specs/<id>.md`) just before it's built ([`s
 
 | Id | Responsibility | Depends on |
 |---|---|---|
-| `platform` | Repo, CI, configuration, logging, the contract package, the document service, the web app's shell, the walking skeleton deployed to the host | none |
+| `platform` | Repo, CI, configuration, logging, the contract package, the document service, the web app's shell, the walking skeleton running on the owner's Mac | none |
 | `accounts` | Sign-in through Supabase Auth with two factors, token verification, account rows, owner commands for people | `platform` |
 | `settings` | Search preferences, eligibility rules you opt into, screening and resume options | `accounts` |
 | `ai` | The one door to Claude: model and effort per task, structured outputs, refusals, the spend ledger, pauses | `platform` |
@@ -65,7 +65,7 @@ Each module gets its own spec (`docs/specs/<id>.md`) just before it's built ([`s
 
 Build order:
 1. `platform` → `accounts` → `settings` → `ai` and `job-pool` (independent) → `master-resume` → `screening` → `inbox`;
-2. **the alpha:** the owner's real search on the production deploy, the first with data;
+2. **the alpha:** the owner's real search on the real-use stack on the Mac, the first with data;
 3. `tailoring` → `applications`.
 
 ## Flows in v1
@@ -163,7 +163,7 @@ There are no passwords to remember. Until Instante has a domain and its own mail
 - **After the AI call, for you only:**
   - remote jobs limited to another country are filtered out;
   - so are postings asking for more years than your limit, a level you turned off, or current enrolment once you've graduated;
-  - the eligibility rules you turned on (sponsorship, clearance, French) give a No, with the posting's own words as the reason.
+  - the eligibility rules you turned on (sponsorship, clearance, French, graduation, maximum years) give a No, with the posting's own words as the reason.
 - **The verdict, in code** ([ADR-007](decisions/ADR-007-screening-one-call-verdict-in-code.md) has the full table):
   - met counts 1 and partly met ½, over the must-haves, or the nice-to-haves when there are none;
   - Yes at 75% or more, Maybe at 50% or more, otherwise No;
@@ -219,7 +219,7 @@ A list of the jobs you applied to: company, role, applied date, status (Applied,
 
 ### Account and data
 
-- **Deleting a person:** `users delete` removes their rows at once, files included, and the owner deletes the matching user in Supabase. Database backups expire within the host's restore window, and Anthropic and Supabase keep their own logs for their stated windows.
+- **Deleting a person:** `users delete` removes their rows at once, files included, and the owner deletes the matching user in Supabase. Database dumps expire after 14 days, and Anthropic and Supabase keep their own logs for their stated windows.
 - **Self-serve export and deletion** wait until someone besides the owner uses Instante.
 
 ## Screens in v1
@@ -251,19 +251,20 @@ Sign in (email code, then authenticator) · Onboarding · Inbox (with the lists 
 
 Instante is built so more people can use it, but inviting anyone besides the owner waits until these are done:
 1. **Email:** custom SMTP for Supabase, which needs a domain with SPF, DKIM and DMARC.
-2. **A privacy notice**, accepted before any processing. It names each processor (Supabase, Anthropic, the host), what each keeps and for how long.
-3. **Self-serve export and deletion.**
+2. **A privacy notice**, accepted before any processing. It names each processor (Supabase, Anthropic, and the host Instante moves to), what each keeps and for how long.
+3. **Self-serve export and deletion,** with a deletion journal that every restore re-applies, so a restored dump can't bring deleted data back.
 4. **Sessions:** `HttpOnly` sessions handled on the server, in place of Supabase's script-readable cookies ([ADR-004](decisions/ADR-004-supabase-auth.md)).
 5. **Employers' text:** a takedown address in the footer, and Lever postings shown as an excerpt and a link, unless a review says otherwise ([ADR-006](decisions/ADR-006-shared-pool-of-full-postings.md)).
 6. **Where people live:** Canada outside Quebec, unless the Law 25 work is done.
 7. **Money:** it stays free, because Nova Scotia (s. 89B) and British Columbia (s. 10) ban charging job seekers for finding work. The per-person AI limits are checked against the budget.
 8. **A short security re-check** of sign-in, isolation and the document service.
+9. **A server:** Instante moves off the owner's Mac, with a domain ([ADR-011](decisions/ADR-011-host.md) is the starting point).
 
 The isolation and unauthenticated test matrices run from the first module, so they're already in place.
 
 ## Success criteria for v1
 
-The owner sets the final numbers at the phase 2 gate. **Release gates** must pass before the owner relies on Instante for the search (phase 4); **tracked** metrics are measured and reported.
+The owner accepted these numbers at the phase 2 gate (decision D1). **Release gates** must pass before the owner relies on Instante for the search (phase 4); **tracked** metrics are measured and reported.
 
 | Criterion | Proposed target | Kind | Checked by |
 |---|---|---|---|
@@ -284,14 +285,14 @@ The owner sets the final numbers at the phase 2 gate. **Release gates** must pas
 | AI spend | within the monthly budget | Tracked | Call ledger, Console spend limit |
 | Does it help? | Yes and Maybe jobs found per week that the owner wouldn't have seen; applications sent per week with an Instante resume; minutes per application | Tracked | Owner's log |
 
-An eval this size can catch a bad screener but can't prove a 5% error rate: with about 25 held-out pairs on each side, one error is already 4%. So the gate counts errors on the held-out pairs, and the rates are tracked with their intervals rather than gated. A tighter gate needs about three times the labelling, which is the owner's call in phase 2.
+An eval this size can catch a bad screener but can't prove a 5% error rate: with about 25 held-out pairs on each side, one error is already 4%. So the gate counts errors on the held-out pairs, and the rates are tracked with their intervals rather than gated. A tighter gate needs about three times the labelling, and the owner kept this size (decision D1).
 
 ## Assumptions
 
 1. Instante is a personal project for the owner, built so others could be added later ([checklist](#before-anyone-else-uses-it)).
 2. The AI provider is Anthropic's Claude API, with the data described in [`architecture.md`](architecture.md#the-ai-layer).
 3. Jobs are collected only through public, documented job-board APIs whose terms don't forbid it. Nothing evades bot checks or signs in on anyone's behalf.
-4. The owner pays for hosting and AI.
+4. The owner pays for AI. Instante runs on the owner's Mac, so hosting costs nothing in v1.
 5. English only in v1.
 6. One developer, the owner, reviews what an AI agent writes, for about 5 to 8 hours a week. [`sdlc.md`](sdlc.md) shows the sizing and the review policy behind the timeboxes.
 
@@ -316,15 +317,14 @@ The owner also made Instante a personal project rather than a product launch. Th
 ## Decide later
 
 [`sdlc.md`](sdlc.md) lists these with their phases:
-- **Phase 2:**
-  - the host and its budget, and where the production database runs ([ADR-011](decisions/ADR-011-host.md), proposed);
-  - whether to buy a domain before the first real sign-in on production (recommended);
-  - the final success-criteria numbers and the eval's size;
-  - the retention windows;
-  - the list-requirement rule and the eligibility rules offered;
-  - whether a withheld line may be released;
-  - the spend threshold for the Batch API;
-  - Cache Components on or off (off recommended, for a stronger CSP);
-  - error tracking.
+- **Phase 2,** answered 2026-11-13 ([`sdlc.md`](sdlc.md#phase-2-foundations)):
+  - Instante runs on the owner's Mac for now ([ADR-012](decisions/ADR-012-run-on-the-owners-mac.md)), with no domain;
+  - the success-criteria numbers and the eval's size, as proposed;
+  - the retention windows, as proposed;
+  - the list-requirement rule as written, and all five eligibility rules, each off until turned on;
+  - no release of withheld lines in v1;
+  - no Batch API for now;
+  - Cache Components off;
+  - no error tracking.
 - **Phase 3:** the eval labels. Each task's model and effort come from its eval ([ADR-010](decisions/ADR-010-claude-models-are-configuration.md)), and the owner sees the result at the module's demo.
-- **Phase 4:** staging or not.
+

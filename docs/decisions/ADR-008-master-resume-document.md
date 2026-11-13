@@ -1,7 +1,7 @@
 # ADR-008: The master resume is one versioned JSON document with permanent ids, and the AI reads only an allowlisted view of it
 
 ## Status
-Accepted 2026-11-13. At the phase 1 gate the owner chose import option A: the whole file goes to Anthropic. Whether a withheld line may be released is decided in phase 2. Proposed 2026-11-12 and revised after three adversarial review cycles the same day.
+Accepted 2026-11-13. At the phase 1 gate the owner chose import option A: the whole file goes to Anthropic. At the phase 2 gate the owner decided a withheld line isn't released in v1; the person rephrases it instead (D4). Proposed 2026-11-12 and revised after three adversarial review cycles the same day.
 
 ## Date
 2026-11-12

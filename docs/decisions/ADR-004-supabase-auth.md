@@ -1,7 +1,7 @@
 # ADR-004: Sign-in through Supabase Auth with two factors; the backend verifies its tokens and owns accounts
 
 ## Status
-Accepted 2026-11-13. At the phase 1 gate the owner chose Supabase Auth over the proposed emailed codes on our own backend. The same day, a fresh-context review led to these changes:
+Accepted 2026-11-13. At the phase 1 gate the owner chose Supabase Auth over the proposed emailed codes on our own backend. At the phase 2 gate the owner chose to run Instante on their own Mac ([ADR-012](ADR-012-run-on-the-owners-mac.md)), which changed the production guard and removed the domain. The same day, a fresh-context review led to these changes:
 - accounts are linked by Supabase user id, not by email;
 - an authenticator app is required as a second factor;
 - the key cache keeps working through a Supabase outage;
@@ -59,7 +59,7 @@ Accepted 2026-11-13. At the phase 1 gate the owner chose Supabase Auth over the 
   - Instante never reads Supabase's `auth` schema, and a person's account and data live in Instante's database under our own ids.
   - The backend trusts nothing from Supabase but a verified token whose `sub` it already knows.
 - **Two Supabase projects, both on Free while only the owner signs in:** production (Canada Central) and development. Together they use the owner's two free projects.
-  - Where Instante's own database runs is decided with the host in phase 2 ([ADR-003](ADR-003-one-postgres-database.md)). The recommendation is the host.
+  - Instante's own database runs on the owner's Mac ([ADR-003](ADR-003-one-postgres-database.md), [ADR-012](ADR-012-run-on-the-owners-mac.md)), never in Supabase.
 - **Project settings:**
   - sign-ups off; anonymous sign-ins off; email the only provider;
   - the magic-link email template shows the code (`{{ .Token }}`) instead of a link, so no callback route exists;
@@ -81,7 +81,7 @@ Accepted 2026-11-13. At the phase 1 gate the owner chose Supabase Auth over the 
   A password, or an email code alone, never gets past the backend, because the backend requires `aal2`.
 - **Keeping the session fresh:**
   - `proxy.ts` makes Supabase's server client and calls `getClaims()` on each navigation;
-  - its matcher covers every page, sign-in included (for the CSP), and leaves out `/api`, static assets and prefetches; the sign-in pages skip the redirects below;
+  - it runs on pages, sign-in included (for the CSP), after `platform`'s `Host` and Fetch Metadata checks; `/api` passes through before this logic, and prefetches get the refresh but never a redirect; the sign-in pages skip the redirects below;
   - it refreshes the session when the access token has under 5 minutes left, so a render never meets supabase-js's own 90-second refresh margin;
   - if the key set can't be fetched (Supabase down or paused), it lets the request through, since the backend verifies with its own key cache;
   - it accepts a `next` path only if it starts with a single `/` and names a known route;
@@ -110,9 +110,9 @@ Accepted 2026-11-13. At the phase 1 gate the owner chose Supabase Auth over the 
   - **A re-created identity:** after the Supabase user or project is re-created, `users relink <email> <new-user-id>` sets the new `sub` and writes an audit event. The data is kept.
 - **Production can't be pointed at the test sign-in:**
   - the backend takes one setting, `SUPABASE_URL`, and derives both the issuer and the JWKS address from it;
-  - a separate `INSTANTE_ENV=production`, set only in the host's settings, makes the backend refuse to start unless `SUPABASE_URL` matches `^https://[a-z0-9]{20}\.supabase\.co$`;
-  - the fake Supabase and its test key live under `apps/backend/test/` and never enter the production image. The image smoke test checks this;
-  - a CI test starts the production image with `INSTANTE_ENV=production` and the fake's address, and expects it to exit.
+  - a separate `INSTANTE_ENV=production`, set only by `instante start` on the Mac, makes the backend refuse to start unless `SUPABASE_URL` matches `^https://[a-z0-9]{20}\.supabase\.co$`;
+  - the fake Supabase and its test key live under `apps/backend/test/`, which `src/` can't import (an ESLint rule);
+  - a CI test starts the production build with `INSTANTE_ENV=production` and the fake's address, and expects it to exit.
 
   End-to-end tests run production builds with `INSTANTE_ENV=test`.
 - **Development, CI and agents never sign in through Supabase:**
@@ -152,9 +152,9 @@ Accepted 2026-11-13. At the phase 1 gate the owner chose Supabase Auth over the 
 ## Consequences
 - **Much less security code of our own:** no codes, HMACs, email sending, per-address limits, sessions table or invite list. The `accounts` module is token verification, the key cache, account rows, the sign-in page and owner commands.
 - **Two factors on every sign-in.** The authenticator code arrives once per new session, and sessions last until sign-out. Guessing email codes, or a password from the dashboard, gets an attacker only `aal1`, which the backend refuses.
-- **No email provider is needed** while only the owner signs in. A domain is still recommended before the first real sign-in on production, because a shared hostname's operators could take over the address ([ADR-011](ADR-011-host.md), decision D8). Inviting anyone else also needs custom SMTP on that domain.
+- **No email provider or domain is needed** while only the owner signs in, at `http://instante.localhost:4310` on the Mac ([ADR-012](ADR-012-run-on-the-owners-mac.md); decision D8: not now). Inviting anyone else needs custom SMTP, and with it a domain.
 - **Scripts can read the session cookie,** and its refresh token never expires. An XSS bug would hand an attacker the session, which then holds `aal2`.
-  - The defences: no raw HTML (a floor rule), React's escaping, Markdown without raw HTML, no third-party scripts, and a nonce-based CSP once Cache Components is off, which phase 2 recommends ([ADR-005](ADR-005-same-origin-rewrite-and-typed-contract.md)).
+  - The defences: no raw HTML (a floor rule), React's escaping, Markdown without raw HTML, no third-party scripts, and a nonce-based CSP with Cache Components off (decision D6, [ADR-005](ADR-005-same-origin-rewrite-and-typed-contract.md)).
   - Accepted for one person; revisited before anyone else uses Instante.
 - **Lockout:** anyone who knows the sign-in address can use up the project's 2 emails an hour, and each request cancels the previous code. Existing sessions keep working, so this blocks only new sign-ins.
   - The defence is to sign in with an address that isn't in the repository or its commits.

@@ -1,7 +1,7 @@
 # ADR-001: A separate backend behind the Next.js app, plus a document service with no secrets
 
 ## Status
-Accepted 2026-11-13, with hosting model (a), at the phase 1 gate. Proposed 2026-11-12 and revised after three adversarial review cycles the same day.
+Accepted 2026-11-13, with hosting model (a), at the phase 1 gate. Updated the same day for running on the owner's Mac ([ADR-012](ADR-012-run-on-the-owners-mac.md)). Proposed 2026-11-12 and revised after three adversarial review cycles the same day.
 
 ## Date
 2026-11-12
@@ -15,17 +15,17 @@ Accepted 2026-11-13, with hosting model (a), at the phase 1 gate. Proposed 2026-
 
 ## Decision
 - **Next.js** (`apps/web`) draws pages and forms. It holds no secrets, runs no SQL, calls no model and fetches no job board.
-- **The backend** (`apps/backend`, `ROLE=all`) owns data, rules, AI calls and fetching. In v1 it's one process serving the HTTP API and running the pg-boss worker; the same image can run as `ROLE=api` and `ROLE=worker` once a measurement shows the worker slowing the API.
-- **The document service** (`apps/backend`, `ROLE=documents`), the same image run as its own private process:
+- **The backend** (`apps/backend`, `ROLE=all`) owns data, rules, AI calls and fetching. In v1 it's one process serving the HTTP API and running the pg-boss worker; the same code can run as separate API and worker processes once a measurement shows the worker slowing the API.
+- **The document service** (`apps/backend`, `ROLE=documents`), the same code run as its own process:
   - **What it does:** parses uploads (PDF, DOCX) and posting HTML, and renders PDFs with Typst.
-  - **What it can't reach:** it holds no secrets in its environment, the database's firewall doesn't admit it, and its outbound network is closed where the host allows.
-  - **How it's called:** only the backend calls it, sending bytes over the private network and receiving text, JSON or a PDF.
-  - **Inside it,** each job runs in a child process under Node's permission model (file reads limited to the input; no writes, child processes or workers), with a heap limit, input caps, a timeout and a kill. That's a seat belt against bugs and runaway inputs, not the security boundary. Typst runs with `--root` set to the job's folder, packages offline and an address-space limit.
-- **Network:** the browser reaches the backend only through Next.js's same-origin rewrite. In the recommended hosting model, the backend, the document service and the database sit on a private network ([ADR-005](ADR-005-same-origin-rewrite-and-typed-contract.md)).
+  - **What it holds:** no secret and no database password in its environment. On the owner's Mac the database takes only password-checked connections on its socket ([ADR-012](ADR-012-run-on-the-owners-mac.md)), so the service can't use it.
+  - **How it's called:** only the backend calls it, over a Unix socket in Instante's `0700` data folder, sending bytes and receiving text, JSON or a PDF. Browsers can't reach a socket.
+  - **Inside it,** each job runs in a child process under Node's permission model (file reads limited to the input; no writes, child processes or workers), with a heap limit, input caps, a timeout and a kill. That's a seat belt against bugs and runaway inputs, not the security boundary. Typst runs with `--root` set to the job's folder, packages offline and a time limit; `tailoring`'s spec sets its memory cap on macOS.
+- **Network:** the browser reaches the backend only through Next.js's same-origin rewrite. On the owner's Mac the web app and the backend listen only on loopback, and the document service and the database only on sockets ([ADR-005](ADR-005-same-origin-rewrite-and-typed-contract.md), [ADR-012](ADR-012-run-on-the-owners-mac.md)).
 
 ## What the separation protects, and what it doesn't
 - **Next.js:** a remote-code-execution bug there doesn't hand over the database credentials or the Anthropic key. But Next.js still handles every signed-in person's Supabase session and renders their data, so it's patched the day a security release lands, and the phase 2 threat model treats it as a holder of live sessions.
-- **The document service:** a code-execution bug in a parser gives an attacker that service only. It has no secrets and no database access, so the attacker sees the document in flight and, if the host can't close outbound network, can send that one document out. That's the accepted residual risk.
+- **The document service:** a code-execution bug in a parser, inside a child, meets Node's permission model: no network, writes or processes. That's a seat belt, not a sandbox. On the Mac, an exploit that escapes it runs as the owner and reaches what the owner's account can. That's the accepted residual risk while only the owner uploads and the boards are hand-picked (R2 in the [threat model](../threat-model.md)).
 
 ## Alternatives considered
 
@@ -37,10 +37,10 @@ Accepted 2026-11-13, with hosting model (a), at the phase 1 gate. Proposed 2026-
 | Separate API and worker processes from day one | More moving parts and memory for one person; split later on a measured trigger |
 
 ## Consequences
-- **Processes:** three long-running ones (web, backend, document service) from two images (web and backend), plus short-lived children.
+- **Processes:** three long-running ones (web, backend, document service) from one workspace, plus short-lived children.
 - **Tests:** business rules are tested without the Next.js runtime.
-- **Host requirements:** the vendor criteria require private networking for the document service and a database firewall that admits only the backend.
-- **Acceptance tests on the production image:** the document service's environment holds no secrets, it can't open a connection to the database, and a child can't start a process.
+- **The machine's set-up:** the document service gets no secret and no database password, and listens only on a socket in the `0700` data folder ([ADR-012](ADR-012-run-on-the-owners-mac.md)).
+- **Acceptance tests on the production build:** the document service's environment holds no secret or database URL, and a child can't reach the network, write, start a process or read the secrets folder.
 
 ## Doubts raised
 Single-model reviews; the owner chose to skip a cross-model second opinion.
@@ -52,5 +52,5 @@ Single-model reviews; the owner chose to skip a cross-model second opinion.
 
 ## Revisit when
 - The worker measurably slows API responses: split API and worker.
-- The host can't give the document service private networking or keep it away from the database: reopen this decision before building.
+- Others upload, or the sources widen beyond the curated boards: give the document service a real sandbox (a macOS sandbox profile, a container or a server).
 - A parser advisory lands: patch the same day.

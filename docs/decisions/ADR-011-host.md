@@ -1,7 +1,7 @@
 # ADR-011: One DigitalOcean server in Toronto with Docker Compose and Caddy, plus DigitalOcean Managed PostgreSQL
 
 ## Status
-Proposed 2026-11-13 in phase 2, for the owner's approval at the phase 2 gate, and revised the same day after a fresh-context review. It applies hosting model (a) ([ADR-005](ADR-005-same-origin-rewrite-and-typed-contract.md)) and settles where the production database runs ([ADR-003](ADR-003-one-postgres-database.md)). Whether to buy a domain before the first real sign-in is decision D8 ([`sdlc.md`](../sdlc.md#phase-2-foundations)).
+Not adopted, 2026-11-13. At the phase 2 gate the owner chose to run Instante on their own Mac for now ([ADR-012](ADR-012-run-on-the-owners-mac.md)). This record stays as the reviewed starting point if Instante ever moves to a server. Its facts and prices were checked on 2026-11-13 and need checking again before use. It was proposed the same day and revised after a fresh-context review.
 
 ## Date
 2026-11-13

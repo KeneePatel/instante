@@ -42,7 +42,7 @@ TypeScript on Node.js 26 LTS, in the same pnpm workspace as the web app.
 | Checks | `tsc --noEmit` (TypeScript 6.0 pinned: typescript-eslint 8.72 accepts below 6.1, and TypeScript 7 waits until it supports 7); ESLint with typescript-eslint `strictTypeChecked`; Prettier; Vitest |
 
 - **No build step:** the backend runs its `.ts` files with Node's type stripping, with `erasableSyntaxOnly` and `verbatimModuleSyntax` set.
-- **Deploys:** images are built from the whole workspace, with symlinks intact, never with `pnpm deploy`. Node won't strip types under `node_modules`. CI boots the production image.
+- **Releases:** the whole workspace is built in a release folder of its own on the Mac, with symlinks intact, never with `pnpm deploy`. Node won't strip types under `node_modules`. CI starts the production build.
 
 **The real trade.** One language across the repo, with one contract package checked by one compiler and reviewed by an owner who knows TypeScript. The cost: Python's stronger library fit for documents and model output, and its HTTP layer's better security record.
 
@@ -83,6 +83,6 @@ A single-model review; the owner chose to skip a cross-model second opinion.
 - **"The fallback trigger can't be measured":** valid. The language is final once the walking skeleton's acceptance tests pass; after that, only a failed test reopens it. (Cycle 2 moved those checks from throwaway phase 2 spikes into the `platform` slice.)
 
 ## Revisit when
-- A walking-skeleton acceptance test fails at the start of phase 3: the contract table, pg-boss in a transaction, the document service's isolation, the image booting from the workspace, or memory on the host ([`sdlc.md`](../sdlc.md#phase-3-build-in-slices)).
+- A walking-skeleton acceptance test fails at the start of phase 3: the contract table, pg-boss in a transaction, the document service's isolation, or the production build starting from the workspace ([`sdlc.md`](../sdlc.md#phase-3-build-in-slices)).
 - Ingestion outgrows one Node process: a Go service is the candidate.
 - Heavy local document processing or local embeddings become necessary: Python, for that part only.

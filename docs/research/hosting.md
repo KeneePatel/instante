@@ -1,5 +1,7 @@
 # Hosting for hosting model (a)
 
+**Owner's decision, 2026-11-13:** no server for now. Instante runs on the owner's Mac ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md)), and this note stays as the research for a move.
+
 Checked on 2026-11-13 for [ADR-011](../decisions/ADR-011-host.md), on each vendor's own pricing pages and docs. Most pricing pages are undated. Prices are monthly, in USD, at the smallest sensible sizes.
 
 The question: where do the web app (public), the backend (private), the document service (private, no secrets, ideally no route out) and PostgreSQL (admitting only the backend, with point-in-time restore) run, for one person in Canada?

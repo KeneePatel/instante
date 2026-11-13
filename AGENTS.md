@@ -54,8 +54,9 @@ Instante is built in the phases set out in [`docs/sdlc.md`](docs/sdlc.md). The c
 - Never read, query, dump, copy or paste real people's data. That covers:
   - production or backup databases, and restore-drill forks;
   - production logs and the AI provider's console logs;
-  - the database, Supabase project and AI workspace of the owner's own real use.
-- Never hold production credentials. Owner commands run in the host's browser console, behind two-factor sign-in, never from the shell agents use. CI deploy credentials live in a protected environment that agent branches can't use.
+  - the database, Supabase project and AI workspace of the owner's own real use. On the owner's Mac that's everything in `~/.instante`: the real-use cluster and its socket, the secrets, the dumps, the logs and the releases.
+- Never hold production credentials. They live only in `~/.instante/secrets`. Never read or edit `~/.instante`, never run the owner's `instante` command, and never connect to the real-use cluster; the owner runs `instante` in their own terminal. Test `scripts/local/` only against a scratch `INSTANTE_HOME`. CI holds no secrets.
+- Agents run on the same Mac and user account as the real data, so these rules are what keep them out ([ADR-012](docs/decisions/ADR-012-run-on-the-owners-mac.md)). The repository's Claude Code settings, and the owner's own, back them up. Never add `sandbox` or `allowRead` settings to `.claude/` files or loosen a deny rule, and never change GitHub's rules for `main`.
 - Development and tests use only seeded Jordan Rivera data and anonymized postings, in fixtures, tests, screenshots and docs alike.
 - When a real case needs investigating, the owner runs `verdict show`, which is read-only and prints ids, counts, requirement text and verdict provenance, never resume or contact text. The owner shares only that output.
 - `verdict replay` runs new AI calls, with the eval workspace's key and budget, and prints verdicts and differences only. Only the owner runs it.

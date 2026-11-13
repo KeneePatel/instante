@@ -2,7 +2,7 @@
 
 A personal web app for a job search. Instante keeps a pool of full job postings from companies' own job boards and screens them against the master resume, showing the evidence and computing the verdict in code. For a chosen job, it writes a one-page resume using only facts the person already has.
 
-**Status:** phase 1 of 5, *Discover and decide*. The work finished 2026-11-12, including three adversarial review cycles over every decision. The owner answered the gate questions and signed the phase off on 2026-11-13, and every ADR is accepted. Phase 2, *Foundations*, started the same day: its drafts (the host, the threat model, retention, the `platform` and `accounts` specs) wait for the owner. There's no code yet. The lifecycle is in [`docs/sdlc.md`](docs/sdlc.md).
+**Status:** phase 2 of 5, *Foundations*. Phase 1 was signed off on 2026-11-13. The owner answered every phase 2 item the same day and chose to run Instante on their own Mac for now ([ADR-012](docs/decisions/ADR-012-run-on-the-owners-mac.md)); the parts of the specs and the threat model revised for that wait for the owner's confirmation. There's no code yet. The lifecycle is in [`docs/sdlc.md`](docs/sdlc.md).
 
 ## Read in this order
 
@@ -19,8 +19,8 @@ A personal web app for a job search. Instante keeps a pool of full job postings 
 | Frontend | Next.js 16 with shadcn/ui, TypeScript, Tailwind, ESLint, pnpm, `create-next-app` defaults (the owner's choice) | [ADR-005](docs/decisions/ADR-005-same-origin-rewrite-and-typed-contract.md) |
 | Backend | TypeScript on Node 26: Hono and pg-boss in one process, Drizzle, Zod; a private document service with no secrets parses hostile files and renders PDFs | [ADR-001](docs/decisions/ADR-001-separate-backend.md), [ADR-002](docs/decisions/ADR-002-typescript-backend.md) |
 | Contract | A route table in `packages/contract`, shared by web and backend | [ADR-005](docs/decisions/ADR-005-same-origin-rewrite-and-typed-contract.md) |
-| Hosting model | Web app and backend on one host; the backend private | [ADR-005](docs/decisions/ADR-005-same-origin-rewrite-and-typed-contract.md) |
-| Database | PostgreSQL 18 for data, queue and files; where production's runs is decided in phase 2 | [ADR-003](docs/decisions/ADR-003-one-postgres-database.md) |
+| Where it runs | The owner's Mac, for now: web app, backend and document service on loopback and sockets, started by hand; no server or domain | [ADR-012](docs/decisions/ADR-012-run-on-the-owners-mac.md), [ADR-005](docs/decisions/ADR-005-same-origin-rewrite-and-typed-contract.md) |
+| Database | PostgreSQL 18 for data, queue and files; for real use, a cluster of its own on the Mac, on a Unix socket with passwords | [ADR-003](docs/decisions/ADR-003-one-postgres-database.md) |
 | Accounts | Supabase Auth with an emailed code plus an authenticator app, and sign-ups off; the backend verifies its tokens, requires both factors and keeps its own accounts | [ADR-004](docs/decisions/ADR-004-supabase-auth.md) |
 | Jobs | A hand-curated catalog of companies' public boards on Greenhouse, Ashby and Lever, plus pasted postings; full postings only | [ADR-006](docs/decisions/ADR-006-shared-pool-of-full-postings.md) |
 | Screening | Filters, then one AI call per person and posting; the verdict in code | [ADR-007](docs/decisions/ADR-007-screening-one-call-verdict-in-code.md) |

@@ -1,7 +1,7 @@
 # ADR-003: One PostgreSQL 18 database for data, the queue and files
 
 ## Status
-Accepted 2026-11-13 at the phase 1 gate. Where production's database runs is decided with the host in phase 2. Proposed 2026-11-12 and revised after the adversarial review the same day.
+Accepted 2026-11-13 at the phase 1 gate. At the phase 2 gate, production's database went onto the owner's Mac ([ADR-012](ADR-012-run-on-the-owners-mac.md)). Proposed 2026-11-12 and revised after the adversarial review the same day.
 
 ## Date
 2026-11-12
@@ -19,10 +19,10 @@ Accepted 2026-11-13 at the phase 1 gate. Where production's database runs is dec
   - a generated `tsvector` with a GIN index for search;
   - pg-boss's queue and schedules in their own schema;
   - files as `bytea` in one `stored_file` table, referenced by the rows that own them.
-- **Where it runs:** locally, Homebrew's `postgresql@18`, with tests on copies of a migrated template database. In CI, a `postgres:18` service container. In production, DigitalOcean Managed PostgreSQL in Toronto, admitting only the app's server, as proposed in [ADR-011](ADR-011-host.md). The alternative is the production Supabase project's own database ([ADR-004](ADR-004-supabase-auth.md)): it would need Pro ($25 a month) for daily backups, point-in-time restore as an add-on (about $100 a month for 7 days, and the plan asks for it from the alpha), its Data API turned off, and a direct or session-mode connection for pg-boss.
+- **Where it runs:** locally, Homebrew's `postgresql@18`, with tests on copies of a migrated template database. In CI, a `postgres:18` service container. In production, a separate PostgreSQL 18 cluster on the owner's Mac, reachable only through a Unix socket and only with a password ([ADR-012](ADR-012-run-on-the-owners-mac.md)). [ADR-011](ADR-011-host.md)'s managed database needed a server. Another alternative is the production Supabase project's own database ([ADR-004](ADR-004-supabase-auth.md)): it would need Pro ($25 a month) for daily backups, point-in-time restore as an add-on (about $100 a month for 7 days, and the plan asks for it from the alpha), its Data API turned off, and a direct or session-mode connection for pg-boss.
 - **Portability:** no SQL that only runs on 18, so hosts still on 17 stay possible. Ids are UUIDv7 made in the backend.
-- **Migrations:** numbered SQL files and our own runner ([ADR-002](ADR-002-typescript-backend.md)). They change freely until the first production deploy, which is the start of the owner-only alpha. Just before it they're squashed into a baseline, with backups and point-in-time restore switched on; after it, they only expand.
-- **Access:** two roles, `instante_owner` (migrations and pg-boss's schema) and `instante_app` (rows only).
+- **Migrations:** numbered SQL files and our own runner ([ADR-002](ADR-002-typescript-backend.md)). They change freely until the first real use with data, the start of the owner-only alpha. Just before it they're squashed into a baseline, and the real-use database is recreated from it; after it, they only expand.
+- **Access:** two roles, `instante_owner` (migrations and pg-boss's schema) and `instante_app` (rows only). On the Mac, a superuser used only by `instante setup` joins them ([ADR-012](ADR-012-run-on-the-owners-mac.md)).
 - **Isolation without row-level security in v1:**
   - `user_id NOT NULL` on every per-user table;
   - composite keys `(user_id, id)` between per-user tables;
@@ -48,7 +48,7 @@ Accepted 2026-11-13 at the phase 1 gate. Where production's database runs is dec
 - One stateful service to run, back up, secure and delete from. An account deletion is one transaction, files included. Backups and providers' logs are listed in the deletion inventory.
 - Without RLS, a missing visibility rule is the main way data could leak. The composite keys catch cross-user references in the database, and the generated matrix catches missing routes.
 - Files sit in their own table, so list queries never pull PDF bytes.
-- Free database tiers (0.5 to 1 GB) will run out. Expect US$15 to US$25 a month for a managed database at release.
+- On the Mac the database costs nothing. If Instante moves to a server, expect US$15 to US$25 a month for a managed database ([ADR-011](ADR-011-host.md)).
 
 ## Doubts raised (adversarial review, 2026-11-12)
 A single-model review; the owner chose to skip a cross-model second opinion.

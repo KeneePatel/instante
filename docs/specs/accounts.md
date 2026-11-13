@@ -1,13 +1,13 @@
 # Spec: `accounts`, sign-in and people
 
-**Status:** draft for the owner's approval, phase 2, 2026-11-13, revised the same day after two fresh-context reviews. Module id `accounts`; it depends on `platform`. It implements [ADR-004](../decisions/ADR-004-supabase-auth.md), which holds the reasons and sources; this spec says what gets built.
+**Status:** approved by the owner at the phase 2 gate, 2026-11-13, then revised the same day for running on the owner's Mac ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md)): the site URLs, where the keys live, the fake's address, the owner commands, and criteria 2, 3, 7 and 8. A fresh-context review then moved real use to its own host name, `instante.localhost`, so no other local page shares the session cookie. Those parts wait for the owner's confirmation. Module id `accounts`; it depends on `platform`. It implements [ADR-004](../decisions/ADR-004-supabase-auth.md), which holds the reasons and sources; this spec says what gets built.
 
 ## Objective
 
 The owner signs in with an emailed code and an authenticator app. Once signed in, the backend accepts only verified, two-factor tokens for people it already knows. The owner manages people with commands.
 
 When `accounts` is done:
-- the owner signs in on production, at the domain if D8 is approved;
+- the owner signs in on the real-use stack, at `http://instante.localhost:4310`;
 - `GET /api/me` returns the owner's account;
 - every later module can declare `auth: 'user'` routes and receive the signed-in person.
 
@@ -21,7 +21,7 @@ When `accounts` is done:
 1. The owner creates two Supabase projects on the Free plan: development, and production in Canada (Central).
 2. Built-in email, which reaches only the owner, is enough.
 3. `platform` is done: `registerRoutes` takes an injected `authenticate`, the fetch helper takes a token provider, and `proxy.ts` builds the CSP.
-4. The first real sign-in on production uses a domain with CAA records, not a sslip.io hostname (decision D8, [ADR-011](../decisions/ADR-011-host.md)).
+4. Real use is at `http://instante.localhost:4310` on the owner's Mac ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md)), with no domain (decision D8: not now).
 
 ## The Supabase set-up (owner steps, written up as `docs/runbooks/supabase.md`)
 
@@ -33,10 +33,10 @@ For each project, in the dashboard:
 - **Email templates:** the Magic Link template shows only the code (`{{ .Token }}`), with no link.
 - **Multi-factor:** authenticator-app (TOTP) factors on, the default.
 - **JWT signing keys:** asymmetric ES256, with the access-token expiry left at 3,600 seconds.
-- **The site URL:** the app's address.
+- **The site URL:** `http://localhost:3000` for development, and `http://instante.localhost:4310` for production. Neither is ever opened at another address, because cookies don't separate by port and only a host name of its own keeps the production session apart.
 - **Keys:**
-  - the project URL and the publishable key go into the server's configuration for `web`, read at run time;
-  - the project URL goes into the backend's;
+  - the project URL and the publishable key go into `.env` for development and `~/.instante/config.env` for production (the owner types them into `instante config`), read at run time;
+  - the project URL also goes into the backend's settings, from the same files;
   - the secret key is never copied anywhere.
 - **Users:**
   1. Create the owner with "Auto confirm" on and a long random password that isn't saved.
@@ -60,7 +60,7 @@ The authenticator's QR code comes from Supabase as an SVG data URL, so no QR lib
 | `SUPABASE_URL` | web (server), backend | read at run time; with `INSTANTE_ENV=production` the backend refuses anything but `^https://[a-z0-9]{20}\.supabase\.co$` |
 | `SUPABASE_PUBLISHABLE_KEY` | web (server) | public by design; the root layout passes it to the browser client with the URL |
 
-Neither is a `NEXT_PUBLIC_` value, because those are frozen into the build and would make CI's image differ from production's.
+Neither is a `NEXT_PUBLIC_` value: those are frozen into the build, and a build never carries an environment's settings.
 
 ## What gets built
 
@@ -68,7 +68,7 @@ Neither is a `NEXT_PUBLIC_` value, because those are frozen into the build and w
 - **Supabase clients** in `lib/supabase/`:
   - `server.ts` uses `createServerClient` with `getAll` and `setAll`. In Server Components `setAll` does nothing, because only `proxy.ts` writes the cookies.
   - `browser.ts` uses `createBrowserClient` with the URL and key the root layout passes down through a small client provider.
-- **`proxy.ts`,** after the CSP from `platform`, keeping `platform`'s matcher so the sign-in pages get the CSP too. Per request it makes a new server client, whose `setAll` writes cookies to the request and the response and copies the cache headers Supabase passes. Then:
+- **`proxy.ts`,** on pages and prefetches, after `platform`'s `Host`, Fetch Metadata and (for pages) CSP steps, so the sign-in pages get the CSP too; `/api` has already passed through. On a prefetch it refreshes the session as below but never redirects, so a Server Component rendered for a prefetch never meets an expired token. Per request it makes a new server client, whose `setAll` writes cookies to the request and the response and copies the cache headers Supabase passes. Then:
   - **The sign-in pages,** `/sign-in` and `/sign-in/authenticator`, skip the redirects below.
   - **Refreshing early:** if the access token expires within 5 minutes, it refreshes the session here. Rendering then never meets supabase-js's 90-second refresh margin, and a Server Component never refreshes a token it can't store.
   - **Checking the session:** it calls `getClaims()`.
@@ -82,7 +82,7 @@ Neither is a `NEXT_PUBLIC_` value, because those are frozen into the build and w
   - in Server Components, it reads the token `proxy.ts` just checked, and a 401 redirects to `/sign-in`.
 - **Pages:**
   - `/sign-in`, which takes the email, then the code;
-  - `/sign-in/authenticator`, which enrols an authenticator the first time and asks for its code every time;
+  - `/sign-in/authenticator`, which enrols an authenticator the first time, with `issuer: 'Instante'` (`'Instante dev'` on the development project) so the authenticator app doesn't label it with a host and port, and asks for its code every time;
   - `/unknown-account`;
   - the Account section of Settings.
 
@@ -116,12 +116,11 @@ Neither is a `NEXT_PUBLIC_` value, because those are frozen into the build and w
   - `users delete <email>`, which:
     - removes the person's rows in one transaction and cancels their queued jobs;
     - writes one "account deleted" event with no email;
-    - appends the user id and time to the deletion journal;
     - reminds the owner to delete the user in Supabase.
 - **The deletion use case** in `engine`. Later modules add their tables to the deletion test's fixture.
 
 ### The fake Supabase (tests and agents only)
-`apps/backend/test/fake-supabase/` is a small Hono app, never copied into an image. In CI's end-to-end Compose project it runs as a test-only service, reachable under one name from both the browser and the `web` container.
+`apps/backend/test/fake-supabase/` is a small Hono app, which `src/` never imports. In end-to-end runs Playwright's `webServer` starts it on `127.0.0.1`, at one address that both the browser and the web server use.
 - **Endpoints,** the ones supabase-js calls for these flows:
   - `/auth/v1/otp` and `/auth/v1/verify`;
   - `/auth/v1/factors`, `/auth/v1/factors/{id}/challenge` and `/auth/v1/factors/{id}/verify`;
@@ -202,7 +201,7 @@ pnpm --filter @instante/backend test -- auth
 pnpm --filter @instante/web test:e2e -- sign-in
 ```
 
-On the server, owner commands run as `docker compose run --rm backend cli users …` in the Droplet Console.
+For real use, the owner runs them as `instante cli users …` in their own terminal ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md)); agents never do.
 
 ## Project structure
 
@@ -250,22 +249,22 @@ export async function verifyAccessToken(token: string, deps: VerifyDeps): Promis
 | Level | What |
 |---|---|
 | Unit | The verifier: a wrong algorithm (`HS256`, `none`), a wrong issuer or audience, an expired token, an anonymous token, `aal1`, a non-UUID `sub` — each refused, a good token accepted. The key cache: verifying through an outage; a new key id fetched again, but not twice a minute; a removed key dropped at the hourly refresh. `next` validation. `proxy.ts`'s three outcomes, including a failed key-set fetch letting the request through. The TOTP helper against RFC 6238's vectors |
-| Integration | `authenticate` against Postgres: an unknown `sub` with a matching email gets `403 unknown_account`; disabled gets `403`; a changed email is updated and audited. The owner commands, including `relink` and `delete` (rows gone, jobs cancelled, one event without an email, a journal line). The production guard |
+| Integration | `authenticate` against Postgres: an unknown `sub` with a matching email gets `403 unknown_account`; disabled gets `403`; a changed email is updated and audited. The owner commands, including `relink` and `delete` (rows gone, jobs cancelled, one event without an email). The production guard |
 | Unauthenticated matrix | every `user` route: 401 with no token, with an `aal1` token, and with a valid Supabase cookie but no bearer header |
 | Logs | a request carrying a bearer token and a Supabase cookie leaves neither in logs or error reports |
-| End to end, against the fake | sign in with a code and enrol an authenticator, reach the shell, reload; an `aal1` session goes to the authenticator step; with 120-second tokens, a page rendered near expiry refreshes once in `proxy.ts` and stays signed in; sign out; sign out everywhere; the unknown-account page; `next=//elsewhere` returns to `/`; the sign-in pages carry the CSP; axe on every sign-in page |
-| Image | started with `INSTANTE_ENV=production` and the fake's address, the backend exits |
+| End to end, against the fake | sign in with a code and enrol an authenticator, reach the shell, reload; an `aal1` session goes to the authenticator step; with 120-second tokens, a page rendered near expiry, and a prefetch made near expiry, each refresh once in `proxy.ts` and stay signed in; sign out; sign out everywhere; the unknown-account page; `next=//elsewhere` returns to `/`; the sign-in pages carry the CSP; axe on every sign-in page |
+| Production build | started with `INSTANTE_ENV=production` and the fake's address, the backend exits; `src/` can't import the fake |
 
 ## Acceptance criteria
 
 1. On the development project, a dashboard-created, confirmed user signs in by code with sign-ups off, and the token reaches `aal2` after the authenticator step. This confirms what ADR-004 read from Supabase's source, and comes first: the slice runs before anything else is built.
-2. On the development project, from the server, `proxy.ts` refreshes a session whose token is about to expire, once, and the person stays signed in.
-3. On production, the owner signs in with a code and the authenticator, and `GET /api/me` returns their account.
+2. On the development project, in the owner's browser at `http://localhost:3000`, `proxy.ts` refreshes a session whose token is about to expire, once, and the person stays signed in.
+3. On the real-use stack at `http://instante.localhost:4310`, the owner signs in with a code and the authenticator; the session survives a reload and a browser restart in each browser the owner uses (Supabase's cookie over plain `http`); a page at `http://localhost:3000` can't see its cookies; and `GET /api/me` returns their account.
 4. A token at `aal1`, a token for an unknown user id, and a disabled account are all refused there.
 5. With the fake Supabase stopped, a signed-in session keeps working through the backend's key cache, and `proxy.ts` doesn't redirect it to sign-in (CI).
 6. Every test above passes, with changed lines at least 80% covered.
-7. The owner commands work in the Droplet Console.
-8. The production image refuses the fake's address and contains no fake (CI).
+7. The owner commands work as `instante cli users …` against the real-use stack.
+8. The production build refuses the fake's address, and `src/` can't import the fake (CI).
 9. The sign-in screens match the wireframes, carry the CSP, and axe finds nothing critical or serious.
 10. The owner has reviewed, line by line ([`sdlc.md`](../sdlc.md#review-policy)):
     - the verifier and the key cache;
@@ -288,7 +287,7 @@ export async function verifyAccessToken(token: string, deps: VerifyDeps): Promis
   - put Supabase's secret key in either app, in CI or on the Mac;
   - read Supabase's `auth` schema;
   - add a sign-up path, or accept `aal1`;
-  - sign in for real on a sslip.io hostname.
+  - read `~/.instante` or run `instante` (the owner's command for real use).
 
 ## Sizing
 
