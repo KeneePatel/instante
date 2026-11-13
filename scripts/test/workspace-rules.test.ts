@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -72,5 +73,19 @@ describe('package.json files', () => {
       }
       expect(version, name).toMatch(/^\d+\.\d+\.\d+$/);
     }
+  });
+});
+
+describe('the tracked files', () => {
+  it('include no symbolic link, whose target could name a local path', () => {
+    const entries = execFileSync('git', ['ls-files', '--stage'], {
+      cwd: new URL('.', root),
+      encoding: 'utf8',
+    });
+    const links = entries
+      .split('\n')
+      .filter((line) => line.startsWith('120000 '))
+      .map((line) => line.split('\t')[1]);
+    expect(links).toEqual([]);
   });
 });
