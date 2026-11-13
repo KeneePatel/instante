@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Secrets: keep .env.example
+.env
+.env.*
+!.env.example
+*.pem
+
+# Dependencies and builds
+node_modules/
+.pnpm-store/
+.next/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+playwright-report/
+test-results/
+
+# Editors
+.idea/
+.vscode/
+
+# Local data and logs
+*.log
+tmp/
