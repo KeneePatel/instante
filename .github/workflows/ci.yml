@@ -51,5 +51,20 @@ jobs:
           mkdir -p bin
           tar -xzf gitleaks.tar.gz -C bin gitleaks
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-      - name: Scan the whole history, values redacted
-        run: gitleaks git --redact --no-banner .
+      # Scans the commits this push or pull request adds, as gitleaks' own action does.
+      # The first commits were scanned before they were pushed; one of them holds a
+      # reworded false positive that a whole-history scan would flag on every run.
+      - name: Scan the new commits, values redacted
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          zero=0000000000000000000000000000000000000000
+          if [ "$GITHUB_REF" = "refs/heads/main" ] && [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "$zero" ] \
+             && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            range="${BEFORE}..HEAD"
+          else
+            range="$(git merge-base origin/main HEAD)..HEAD"
+          fi
+          echo "Scanning $range"
+          gitleaks git --redact --no-banner --log-opts="$range" .
