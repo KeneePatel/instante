@@ -195,7 +195,7 @@ That keeps "patched the day it lands" possible without loosening the setting.
       - the service lists the child's open files with `lsof -p` and fails on any regular file, socket or lock file beyond its own pipes and Node's internal descriptors.
 
       The backend runs the same TCP and `localhost` lookup probes as a positive control, and they must succeed there. Every probe stays on this machine.
-- **`cli`:** `db migrate` and `db status`. Later modules add their owner commands here.
+- **`cli`** (`ROLE=cli`, through `src/main.ts`): `db migrate`, as `instante_owner`, and `db status`, as either role. Exit codes: 0 done, 1 refused, 3 not current (`db status` with anything pending), 64 usage, 78 configuration. Later modules add their owner commands here.
 
 Every Instante process, the web server included, starts with `--disable-sigusr1` on its own command line, not through `NODE_OPTIONS`.
 
@@ -321,7 +321,7 @@ The subcommands:
 - **Scripts:**
   - `scripts/check-commits.ts` and `scripts/check-agent-settings.ts`;
   - `scripts/floor-guard.ts`, adapted from the constraint-driven-development skill's reference (a Node script, as the reference is, so it's typed, linted and tested like the rest);
-  - `scripts/dev-db.sh`, which creates the development roles on Homebrew's cluster, giving the owner role `CREATEDB` for template databases. It creates the `instante_dev` and `instante_test` databases from `template0` with the pinned locale;
+  - `scripts/dev-db.sh`, which creates the development roles on Homebrew's cluster, giving the owner role `CREATEDB` for template databases. It creates the `instante_dev` and `instante_test` databases from `template0` with the pinned locale, writes their URLs to `.dev/secrets/` (git-ignored, `0600`), and migrates both. It creates only what's missing and drops nothing, and CI runs it against its Postgres service;
   - `scripts/local/`, above, with its tests and the GitHub stub.
 - **`.github/workflows/ci.yml`,** on pushes and pull requests. It holds no secrets, because nothing deploys from CI. Its jobs, mostly in parallel:
   - format, lint and types;

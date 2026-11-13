@@ -36,6 +36,20 @@ jobs:
     name: checks
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # The integration tests' Postgres 18, with the pinned locale from initdb (ADR-012). A
+    # throwaway container, reachable only from this runner's loopback, so it trusts local roles.
+    services:
+      postgres:
+        # 18.6, pushed 2026-11-05: pinned by digest, at least 7 days old like every other tool.
+        image: postgres:18.6-bookworm@sha256:f1ea2a1a4fb7b68d4836be1fdcb8a6466a89b072158bf9d97663600538c294c5
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale-provider=builtin --builtin-locale=C.UTF-8 --locale=C
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s
+          --health-retries 30
     steps:
       # The whole history, so diff-cover can compare with origin/main.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,6 +66,11 @@ jobs:
         run: pnpm typecheck
       - name: Lint, with the typed rules
         run: pnpm lint
+      - name: The development and test databases
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+        run: bash scripts/dev-db.sh
       - name: Tests, with coverage
         run: pnpm test:coverage
       - name: Install diff-cover, every package pinned

@@ -128,17 +128,17 @@
   - **Verify:** `pnpm --filter @instante/backend test -- api unauthenticated`.
   - **Depends on:** T7. **Files:** `src/{main,start}.ts`, `src/api/{app,register-routes,middleware}.ts`, `src/api/handlers/{ping,test-routes}.ts` (the fixture PDF is built there, since `src/` takes nothing from `test/`), `test/{api,unauthenticated-matrix,start}.test.ts`. **Size:** M.
 
-- [ ] **T9: The migration runner** (**review:** the runner)
+- [x] **T9: The migration runner** (**review:** the runner)
   - **Does:**
     - the `pg` pool for `instante_app`, given `{ connectionString }` (a bare string is parsed twice), with `pg-connection-string` pinned to the version `pg` itself depends on, so the configuration's guard parses as `pg` does;
     - the runner with `schema_migrations`, failing on a gap, an unknown name, a changed file and the wrong locale;
     - `0001_baseline.sql` and `0002_skeleton.sql`;
-    - `cli db migrate` (step 1) and `db status`;
+    - `cli db migrate` (step 1) and `db status`, run through `src/main.ts` with `ROLE=cli`;
     - `scripts/dev-db.sh`, creating the development roles on Homebrew's cluster (the owner role with `CREATEDB`) and `instante_dev` and `instante_test` from `template0` with the builtin `C.UTF-8` locale. The runner's tests use `instante_test` until T10's harness arrives;
     - CI's Postgres service, `postgres:18` started with `POSTGRES_INITDB_ARGS` for the pinned locale, and the integration-test job.
   - **Acceptance:** the runner refuses each case (platform spec 6), on Homebrew's Postgres 18 with the pinned locale.
   - **Verify:** `scripts/dev-db.sh`; `pnpm --filter @instante/backend test -- migrate`.
-  - **Depends on:** T7. **Files:** `src/store/{pool,migrate}.ts`, `migrations/{0001_baseline,0002_skeleton}.sql`, `src/cli/db.ts`, `scripts/dev-db.sh`, `test/migrate.test.ts`, plus an edit to `ci.yml`. **Size:** M (two of the files are short SQL).
+  - **Depends on:** T7. **Files:** `src/store/{pool,migrate}.ts`, `migrations/{0001_baseline,0002_skeleton}.sql`, `src/cli/db.ts`, `scripts/dev-db.sh`, `test/db.ts` (each test's scratch database, until T10's harness) and `test/migrate.test.ts`, plus edits to `src/main.ts` and `ci.yml`. **Size:** M (two of the files are short SQL).
 
 - [ ] **T10: The development database and the integration harness** (**review:** store scoping)
   - **Does:**
