@@ -1,0 +1,7 @@
+# The docs are written by hand; Prettier formats code and configuration only.
+*.md
+pnpm-lock.yaml
+**/.next/
+**/coverage/
+apps/web/next-env.d.ts
+apps/web/public/

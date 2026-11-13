@@ -32,6 +32,27 @@ jobs:
       - name: Install from the lockfile
         run: pnpm install --frozen-lockfile
 
+  checks:
+    name: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - name: Install from the lockfile
+        run: pnpm install --frozen-lockfile
+      - name: Format
+        run: pnpm format:check
+      - name: Types
+        run: pnpm typecheck
+      - name: Lint, with the typed rules
+        run: pnpm lint
+      - name: Tests
+        run: pnpm test
+
   gitleaks:
     name: gitleaks
     runs-on: ubuntu-24.04
