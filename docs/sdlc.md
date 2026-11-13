@@ -1,6 +1,6 @@
 # How Instante gets built
 
-**Now:** phase 2, *Foundations*, started 2026-11-13. The owner answered every item on 2026-11-13 and chose to run Instante on their own Mac. ADR-012 and the revised parts of the two specs and the threat model wait for the owner's confirmation; then come `tasks/plan.md`, `tasks/todo.md` and the gate (the list under [Phase 2](#phase-2-foundations)). Phase 1 was signed off on 2026-11-13.
+**Now:** phase 3, *Build in slices*, starts with the owner's ruleset on `main` and task T1 of [`tasks/todo.md`](../tasks/todo.md). Phase 2 was signed off on 2026-11-13, with the plan and task list for `platform` and `accounts` approved; phase 1 was signed off the same day.
 
 Instante is built in five phases. Each version goes round them again: version 1 is the smallest product that's useful for one job search, and complexity comes in later versions, only when a trigger in [`architecture.md`](architecture.md#later-and-what-triggers-it) is measured. A phase ends at a gate that only the owner can sign off, and the next phase never starts in the same turn ([`AGENTS.md`](../AGENTS.md)).
 
@@ -69,7 +69,7 @@ If the projected end passes week 12 at a module's spec approval, the owner decid
 
   These slices merge after one of two fixed review sessions a week.
 - **Everything else** merges on green CI plus an agent review pass (the code-review-and-quality skill). The owner sees it at the module's checkpoint demo.
-- **Pushing and merging:** by fast-forward from the command line ([`AGENTS.md`](../AGENTS.md)), and only when the owner asks. There's no standing approval.
+- **Pushing and merging:** by fast-forward from the command line, after CI passes ([`AGENTS.md`](../AGENTS.md)). Since 2026-11-13 the owner allows everyday git work without asking each time; force pushes, deleting remote branches, rewriting published history and GitHub settings still need the owner's yes.
 
 ## Phase 1: Discover and decide (signed off 2026-11-13)
 
@@ -114,12 +114,12 @@ If the projected end passes week 12 at a module's spec approval, the owner decid
   The outcomes are under "Doubts raised" in ADR-004 and ADR-010.
 - [x] The owner's sign-off on the revised package (2026-11-13)
 
-## Phase 2: Foundations
+## Phase 2: Foundations (signed off 2026-11-13)
 
 Entry: phase 1 signed off (2026-11-13). Started 2026-11-13. The owner answered every item on 2026-11-13, and the answers are recorded below.
 
 1. **Machine setup:** done by the owner on 2026-11-13: pnpm 12.18.0, Node 26.13.1 through mise, and PostgreSQL 18.7 and gitleaks 8.30.1 from Homebrew. The `mise.toml` that pins Node comes with the `platform` scaffold, and Typst with `tailoring`.
-2. **Where Instante runs:** the owner chose their own Mac, for now, over ADR-011's server. [ADR-012](decisions/ADR-012-run-on-the-owners-mac.md) records it, with defaults for how it runs, which the owner confirms with the revised specs. [ADR-011](decisions/ADR-011-host.md) isn't adopted.
+2. **Where Instante runs:** the owner chose their own Mac, for now, over ADR-011's server. [ADR-012](decisions/ADR-012-run-on-the-owners-mac.md) records it, with defaults for how it runs, which the owner confirmed on 2026-11-13. [ADR-011](decisions/ADR-011-host.md) isn't adopted.
 3. **Threat model:** [`threat-model.md`](threat-model.md), approved, then revised for the Mac: a new section, new actors and boundaries, and two new residual risks (R9, R10).
 4. **Retention:** [the retention table](architecture.md#retention-with-purposes), approved, with the logs and the backups moved to the Mac. After the review, the deletion journal waits for the checklist in [`product.md`](product.md#before-anyone-else-uses-it). The privacy notice waits for the checklist in [`product.md`](product.md#before-anyone-else-uses-it).
 5. **Owner decisions,** answered 2026-11-13:
@@ -140,8 +140,8 @@ Entry: phase 1 signed off (2026-11-13). Started 2026-11-13. The owner answered e
    - **Q2, block or warn when a check fails mid-task?** Default: the floor blocks from the first commit; each new numbered row warns for two weeks, then blocks.
    - **Q3, target numbers, or measure and hold?** Default: the skill's defaults where there's nothing to measure yet. Changed lines at least 80% covered; nothing high or above from osv-scanner; zero critical or serious axe findings. Project coverage is held at its first measured value, with 0.5% tolerance.
    - **Q4, the slowest check before work comes back?** Default: `check:fast` under 5 seconds after every edit, `check:task` under 90 seconds at the end of a task, and no limit in CI.
-7. **Specs for `platform` and `accounts`:** [`docs/specs/platform.md`](specs/platform.md) and [`docs/specs/accounts.md`](specs/accounts.md), with the sign-in screens and the dependency lists. Approved 2026-11-13, then revised for the Mac; the revised parts wait for the owner's confirmation.
-8. **After the owner confirms the revised specs, in a later turn:** `tasks/plan.md` and `tasks/todo.md`. The spec-driven-development skill never plans in the turn that writes or revises a spec.
+7. **Specs for `platform` and `accounts`:** [`docs/specs/platform.md`](specs/platform.md) and [`docs/specs/accounts.md`](specs/accounts.md), with the sign-in screens and the dependency lists. Approved 2026-11-13, then revised for the Mac; the revised parts were confirmed the same day.
+8. **The plan and the task list:** [`tasks/plan.md`](../tasks/plan.md) and [`tasks/todo.md`](../tasks/todo.md), written 2026-11-13 after the owner confirmed the revised specs (the spec-driven-development skill never plans in the turn that writes or revises a spec). Approved by the owner on 2026-11-13.
 
 **Reviews of these drafts, 2026-11-13:** two fresh-context critics read them, one for security and operations and one for the specs. Each finding was checked against Docker's, OpenSSH's, Next.js's, pg-boss's and Node's documentation or source, then fixed:
 - **Security and operations:** 12 findings, 9 major. The fixes:
@@ -183,7 +183,7 @@ The agents' access to `~/.instante` is left to the owner (R9).
 
 A second review of the revised documents, one reviewer for consistency and one for buildability, then found the bootstrap couldn't create the real home, rollback mode contradicted other files, prefetches skipped the session refresh, and an open tab could reach a test on the real port. Each was fixed, with a dozen minor ones (ADR-012's "Doubts raised").
 
-Gate: items 1 to 8 approved.
+Gate: items 1 to 8 approved. Signed off by the owner on 2026-11-13, with the plan and task list approved, including the link check T25 adds to CI.
 
 ## Phase 3: Build in slices
 
@@ -213,7 +213,7 @@ Entry: phase 2 signed off.
 6. **`inbox`.**
 7. **The owner-only alpha, the first real use with data.**
    - Migrations are squashed into a baseline. The owner drops and recreates the real-use database and pg-boss's schema from it, and checks that FileVault is on and that Time Machine copies `~/.instante/backups`.
-   - Before it, the data terms of Anthropic and Supabase are accepted, because the alpha puts real data with them.
+   - Before it, the data terms of Anthropic and Supabase are accepted, because the alpha puts real data with them, and the owner decides whether to add Claude Code's sandbox or a separate macOS user for real use (R9).
    - The owner uses collection and screening for their real search for about a week, on the real-use database, the production Supabase project and the production AI workspace.
    - From here on, migrations only expand.
 8. **`tailoring`.** It includes the tailoring eval, from which the model is chosen, then `applications`.

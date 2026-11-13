@@ -309,7 +309,7 @@ Answered on 2026-11-13.
 | 5 | Sign-in | Supabase Auth, replacing the proposed emailed codes on our backend | [ADR-004](decisions/ADR-004-supabase-auth.md) |
 | 6 | Sources | A hand-curated list of boards | [ADR-006](decisions/ADR-006-shared-pool-of-full-postings.md) |
 | 7 | Scope | As listed: no cover letters, no Himalayas, no following boards yourself; the Applied list and pasted postings in | this document |
-| 8 | Repository and process | `apps/web` as the Next.js folder; a public GitHub repository; no standing approval to push or merge, and no relation to any other project; the review policy as written | [`sdlc.md`](sdlc.md), [`AGENTS.md`](../AGENTS.md) |
+| 8 | Repository and process | `apps/web` as the Next.js folder; a public GitHub repository; no standing approval to push or merge (changed on 2026-11-13: everyday git work is approved, [`AGENTS.md`](../AGENTS.md)), and no relation to any other project; the review policy as written | [`sdlc.md`](sdlc.md), [`AGENTS.md`](../AGENTS.md) |
 | 9 | Time | 5 to 8 hours a week of review | [`sdlc.md`](sdlc.md#sizing) |
 
 The owner also made Instante a personal project rather than a product launch. That settled the earlier sub-questions on served places (the owner's own search), showing full posting text (the owner is the only reader) and inviting friends (later, [with a checklist](#before-anyone-else-uses-it)).
@@ -317,7 +317,7 @@ The owner also made Instante a personal project rather than a product launch. Th
 ## Decide later
 
 [`sdlc.md`](sdlc.md) lists these with their phases:
-- **Phase 2,** answered 2026-11-13 ([`sdlc.md`](sdlc.md#phase-2-foundations)):
+- **Phase 2,** answered 2026-11-13 ([`sdlc.md`](sdlc.md#phase-2-foundations-signed-off-2026-11-13)):
   - Instante runs on the owner's Mac for now ([ADR-012](decisions/ADR-012-run-on-the-owners-mac.md)), with no domain;
   - the success-criteria numbers and the eval's size, as proposed;
   - the retention windows, as proposed;

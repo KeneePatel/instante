@@ -1,7 +1,7 @@
 # ADR-012: Run Instante on the owner's Mac, as local processes with a database cluster of its own
 
 ## Status
-Accepted 2026-11-13. At the phase 2 gate the owner chose to run Instante on their own computer for now, not on a server, so [ADR-011](ADR-011-host.md) isn't adopted. The details below are defaults written the same day and revised after a fresh-context review whose findings were checked against primary sources, then after a second review of the result ("Doubts raised"). The owner confirms them with the revised [`platform` spec](../specs/platform.md). The decision applies hosting model (a) ([ADR-005](ADR-005-same-origin-rewrite-and-typed-contract.md)) on one machine, and settles where the production database runs ([ADR-003](ADR-003-one-postgres-database.md)).
+Accepted 2026-11-13. At the phase 2 gate the owner chose to run Instante on their own computer for now, not on a server, so [ADR-011](ADR-011-host.md) isn't adopted. The details below are defaults written the same day and revised after a fresh-context review whose findings were checked against primary sources, then after a second review of the result ("Doubts raised"). The owner confirmed them on 2026-11-13, with the revised [`platform` spec](../specs/platform.md), and chose Claude Code deny rules in their user settings to keep agents out of `~/.instante`. The decision applies hosting model (a) ([ADR-005](ADR-005-same-origin-rewrite-and-typed-contract.md)) on one machine, and settles where the production database runs ([ADR-003](ADR-003-one-postgres-database.md)).
 
 ## Date
 2026-11-13
@@ -113,8 +113,8 @@ Accepted 2026-11-13. At the phase 2 gate the owner chose to run Instante on thei
   - the service process itself holds no secret and no database password, but nothing sandboxes it: it has to start children, and Node's permission model can't hold a process that may. Its own input comes only from the backend. An exploit that escapes a child runs as the owner, and even a contained one can kill or signal the owner's processes (residual risk R2).
 - **Agents and the real data:** the agents share the Mac and the user account, so the operating system doesn't keep them out. The controls are:
   - [`AGENTS.md`](../../AGENTS.md): never read `~/.instante`, never run `instante`, never connect to the real-use cluster, never loosen the agent settings;
-  - Claude Code deny rules for `Read` and `Edit` of `~/.instante/**`, in the repository and (the owner's choice) in the owner's user settings, which a repository can't undo;
-  - optionally, Claude Code's sandbox with `~/.instante` denied, which also covers interpreters (the owner's choice, in the phase 2 answers);
+  - Claude Code deny rules for `Read` and `Edit` of `~/.instante/**`, in the repository and in the owner's user settings (set 2026-11-13), which a repository can't undo;
+  - not yet: Claude Code's sandbox with `~/.instante` denied, which would also cover interpreters. The owner decides on it, or on a separate macOS user, before the alpha, when real data first arrives;
   - CI fails if a committed `.claude/` settings file has a `sandbox` key, an `allowRead`, or a rule naming `~/.instante` that isn't a deny; the sandbox lives only in the owner's user settings;
   - the scripts' tests run against a scratch `INSTANTE_HOME`. The default home is used only by a script running from inside `~/.instante/releases/`, or by the first `setup`. Any other run must name a home, and is refused if that home is the same folder as `~/.instante` (compared by device and inode, not by spelling);
   - no production secret sits in the repository, its `.env` files or the owner's shell profile.
@@ -134,7 +134,7 @@ Accepted 2026-11-13. At the phase 2 gate the owner chose to run Instante on thei
 | Docker on the Mac (Docker Desktop, OrbStack or Colima) | Would keep ADR-011's container isolation for the document service and the web app, but needs a new install and a virtual machine, for risks that stay small while only the owner uploads |
 | `http://localhost:4310` or `http://127.0.0.1:4310` for real use | Every other local server at the same host name, the agents' development build included, would share the production session cookie |
 | The Homebrew cluster for real use too, in its own database | That cluster trusts every local connection, so the development databases and the real data would share one unlocked door |
-| A separate macOS user for the real-use stack | The operating system would keep the agents out of the real data, but every owner command needs a user switch. The owner may choose it in the phase 2 answers |
+| A separate macOS user for the real-use stack | The operating system would keep the agents out of the real data, but every owner command needs a user switch. Decided before the alpha |
 | Building releases in place, in one clone | A failed install or build would leave the live copy broken |
 | A rollback mode that runs older code on a newer schema | Needs expand-only migrations and pg-boss downgrades, which change about weekly in pg-boss 12; restoring the pre-release dump is simpler for one person, at the cost of the work since the release |
 | Starting at login (a LaunchAgent) | Collection would run whenever the Mac is on, but it's more to install and to stop. Later, if the owner wants it |

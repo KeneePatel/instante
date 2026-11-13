@@ -1,6 +1,6 @@
 # Constraints
 
-**Status: accepted by the owner on 2026-11-13 at the phase 2 interview, which kept every default (Q1 to Q4 in [`docs/sdlc.md`](docs/sdlc.md#phase-2-foundations)).** There's no code yet, so nothing here runs. In phase 3 every row gets its tool, installed and run on the first commit that has code. Until then this file states the bar. Anyone may tighten it; loosening it needs the owner.
+**Status: accepted by the owner on 2026-11-13 at the phase 2 interview, which kept every default (Q1 to Q4 in [`docs/sdlc.md`](docs/sdlc.md#phase-2-foundations-signed-off-2026-11-13)).** There's no code yet, so nothing here runs. In phase 3 every row gets its tool, installed and run on the first commit that has code. Until then this file states the bar. Anyone may tighten it; loosening it needs the owner.
 
 ## Floor (always enforced, from the first commit with code)
 
@@ -14,7 +14,7 @@
   - `dangerouslySetInnerHTML` or `rehype-raw`;
   - `partialPrefetching` turned off while `cacheComponents` is on.
 - **Models:** no model id other than `claude-sonnet-5-5`, `claude-haiku-5-5` or `claude-sonnet-5` in `apps/*/src`, `packages/*/src` or configuration; Opus is never used ([ADR-010](docs/decisions/ADR-010-claude-models-are-configuration.md)). One named fixture under `apps/backend/test/` may hold a refused id, for the test that proves the start-up check works.
-- **Auth:** the backend never reads a cookie, and in the web app only the typed fetch helper calls `getSession()` ([ADR-004](docs/decisions/ADR-004-supabase-auth.md)).
+- **Auth:** the backend never reads a cookie, and in the web app only the typed fetch helper's token provider (`apps/web/lib/auth/token-provider.ts`) calls `getSession()` ([ADR-004](docs/decisions/ADR-004-supabase-auth.md)).
 - **This bar isn't weakened to make a change pass.** Weakening includes editing this file, the coverage exclude list, the `diff-cover` threshold, `tsconfig` strictness flags, ESLint rule severities, or the migration runner's checks.
 
 A floor guard, adapted from the constraint-driven-development skill's reference and scoped to the diff, checks all of this.

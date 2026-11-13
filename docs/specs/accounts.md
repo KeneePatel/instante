@@ -1,6 +1,6 @@
 # Spec: `accounts`, sign-in and people
 
-**Status:** approved by the owner at the phase 2 gate, 2026-11-13, then revised the same day for running on the owner's Mac ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md)): the site URLs, where the keys live, the fake's address, the owner commands, and criteria 2, 3, 7 and 8. A fresh-context review then moved real use to its own host name, `instante.localhost`, so no other local page shares the session cookie. Those parts wait for the owner's confirmation. Module id `accounts`; it depends on `platform`. It implements [ADR-004](../decisions/ADR-004-supabase-auth.md), which holds the reasons and sources; this spec says what gets built.
+**Status:** approved by the owner at the phase 2 gate, 2026-11-13, then revised the same day for running on the owner's Mac ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md)): the site URLs, where the keys live, the fake's address, the owner commands, and criteria 2, 3, 7 and 8. A fresh-context review then moved real use to its own host name, `instante.localhost`, so no other local page shares the session cookie. Those parts were confirmed by the owner on 2026-11-13. Module id `accounts`; it depends on `platform`. It implements [ADR-004](../decisions/ADR-004-supabase-auth.md), which holds the reasons and sources; this spec says what gets built.
 
 ## Objective
 

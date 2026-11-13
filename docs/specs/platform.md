@@ -1,6 +1,6 @@
 # Spec: `platform`, the walking skeleton
 
-**Status:** approved by the owner at the phase 2 gate, 2026-11-13, then revised the same day for the owner's host answer: Instante runs on the owner's Mac ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md)), not on a server. A fresh-context review of that design, checked by eight verifiers, changed it again the same day, and a second review of the result (consistency and buildability) changed the bootstrap, rollbacks, the lock and the tests. The revised parts wait for the owner's confirmation: assumptions, configuration, the request checks, the document service, the local stack, CI, the acceptance criteria and the sizing. Module id `platform`, the first in the build order ([`product.md`](../product.md#modules-capability-map)); it depends on nothing. It's built at the start of phase 3, and its plan and tasks are written only after this spec is confirmed.
+**Status:** approved by the owner at the phase 2 gate, 2026-11-13, then revised the same day for the owner's host answer: Instante runs on the owner's Mac ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md)), not on a server. A fresh-context review of that design, checked by eight verifiers, changed it again the same day, and a second review of the result (consistency and buildability) changed the bootstrap, rollbacks, the lock and the tests. The revised parts (assumptions, configuration, the request checks, the document service, the local stack, CI, the acceptance criteria and the sizing) were confirmed by the owner on 2026-11-13. Module id `platform`, the first in the build order ([`product.md`](../product.md#modules-capability-map)); it depends on nothing. It's built at the start of phase 3, and its plan and tasks are in [`tasks/plan.md`](../../tasks/plan.md) and [`tasks/todo.md`](../../tasks/todo.md).
 
 ## Objective
 
@@ -55,7 +55,7 @@ Versions are the latest stable on 2026-11-13. Each is pinned exactly when the sc
 | dev | `@playwright/test`, `@axe-core/playwright` | 1.65, 4.14 | end-to-end and accessibility |
 | CI only | gitleaks, osv-scanner, Semgrep, diff-cover, ShellCheck | pinned versions | secrets, advisories, code findings, coverage of changed lines, shell scripts |
 
-ShellCheck is new since the owner's approval and needs the owner's yes. No logger, HTTP client or utility library is added: Node's `console` with our sanitizer, the built-in `fetch`, and `node:http` for the document service's socket are enough.
+ShellCheck was approved with the revised spec on 2026-11-13. No logger, HTTP client or utility library is added: Node's `console` with our sanitizer, the built-in `fetch`, and `node:http` for the document service's socket are enough.
 
 **Security releases younger than 7 days:**
 1. The owner approves one exception row in `CONSTRAINTS.md`.
@@ -303,7 +303,7 @@ The subcommands:
 
   `release` doesn't rely on the ruleset: it checks the exact commit's own CI runs itself;
 - `instante setup` on the Mac, from a clone at the walking skeleton's commit, which also releases it;
-- the agent settings the owner chooses in the phase 2 answers ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md), R9).
+- done on 2026-11-13: deny rules for `~/.instante` in the owner's Claude Code user settings ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md), R9).
 
 ### Scripts, CI and runbooks
 - **Scripts:**
@@ -530,5 +530,5 @@ That's about 7 hours ([`sdlc.md`](../sdlc.md#sizing)).
 
 ## Open questions
 
-- **The agents' access to `~/.instante`** (residual risk R9) is the owner's choice: deny rules only, deny rules plus Claude Code's sandbox, or a separate macOS user for real use ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md)).
+- **The agents' access to `~/.instante`** (residual risk R9): Claude Code deny rules in the owner's user settings since 2026-11-13. Whether to add its sandbox, or a separate macOS user for real use, is decided before the alpha ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md)).
 - Starting Instante at login (a LaunchAgent) stays out of v1 unless the owner asks.

@@ -2,7 +2,7 @@
 
 A personal web app for a job search. Instante keeps a pool of full job postings from companies' own job boards and screens them against the master resume, showing the evidence and computing the verdict in code. For a chosen job, it writes a one-page resume using only facts the person already has.
 
-**Status:** phase 2 of 5, *Foundations*. Phase 1 was signed off on 2026-11-13. The owner answered every phase 2 item the same day and chose to run Instante on their own Mac for now ([ADR-012](docs/decisions/ADR-012-run-on-the-owners-mac.md)); the parts of the specs and the threat model revised for that wait for the owner's confirmation. There's no code yet. The lifecycle is in [`docs/sdlc.md`](docs/sdlc.md).
+**Status:** phase 3 of 5, *Build in slices*, starting. Phases 1 and 2 were signed off on 2026-11-13. Instante runs on the owner's Mac ([ADR-012](docs/decisions/ADR-012-run-on-the-owners-mac.md)), and the approved plan for the first two modules, `platform` and `accounts`, is in [`tasks/`](tasks/plan.md). There's no code yet. The lifecycle is in [`docs/sdlc.md`](docs/sdlc.md).
 
 ## Read in this order
 
