@@ -1,0 +1,3 @@
+# Tools only: no [env], tasks or templates, so the file never needs `mise trust`.
+[tools]
+node = "26.13.1"

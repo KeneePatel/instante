@@ -25,3 +25,6 @@ test-results/
 # Local data and logs
 *.log
 tmp/
+
+# Local development runtime (the document service socket, scratch data)
+.dev/

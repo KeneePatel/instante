@@ -1,0 +1,21 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Nothing younger than 7 days is installed. Set explicitly, this also makes it strict:
+# a version that's too new fails resolution instead of falling back to an older one.
+# A security release younger than 7 days goes in minimumReleaseAgeExclude as one
+# pinned version (name@version), with an exception row in CONSTRAINTS.md.
+minimumReleaseAge: 10080
+minimumReleaseAgeStrict: true
+
+# Dependencies' build scripts stay blocked unless a version is named in allowBuilds,
+# and an unreviewed one fails the install.
+strictDepBuilds: true
+
+# package.json records exact versions, never ranges.
+saveExact: true
+
+# Package links stay inside the checkout (node_modules/.pnpm), which the web app's
+# and the document service's read grants rely on.
+enableGlobalVirtualStore: false
