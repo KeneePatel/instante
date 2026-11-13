@@ -107,11 +107,11 @@
   - **Verify:** `pnpm --filter @instante/backend test -- config`.
   - **Depends on:** T5. **Files:** `src/kit/config.ts`, `src/kit/config.test.ts`. **Size:** S.
 
-- [ ] **T7: The logger, errors, clock and ids**
-  - **Does:** the JSON logger with one sanitizer, `AppError`, the clock and ids.
+- [x] **T7: The logger, errors, clock and ids**
+  - **Does:** the JSON logger with one sanitizer, `AppError`, the clock and ids (UUIDv7 rows from Node's `crypto.randomUUIDv7`, and the contract's resume ids).
   - **Acceptance:** the sanitizer redacts `Authorization` and `Cookie`, and keeps only code, constraint and table from a database error.
   - **Verify:** `pnpm --filter @instante/backend test -- kit`.
-  - **Depends on:** T6. **Files:** `src/kit/{logger,errors,clock}.ts`, `src/kit/logger.test.ts`. **Size:** S.
+  - **Depends on:** T6. **Files:** `src/kit/{sanitize,logger,errors,clock,ids}.ts` and their tests. **Size:** S.
 
 - [ ] **T8: The API and its request checks** (**review:** fail-closed routes; the `Host`, `X-Forwarded-Host` and Fetch Metadata checks)
   - **Does:**

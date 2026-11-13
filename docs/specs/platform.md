@@ -138,7 +138,7 @@ That keeps "patched the day it lands" possible without loosening the setting.
     - the listen address must be loopback;
     - `process.version` must be the pinned Node, and `--disable-sigusr1` must be in `process.execArgv`, with no `--inspect*`, `--debug*` or `--no-disable-sigusr1` beside it in any spelling Node accepts (`_` for `-`, with or without a value), and no `NODE_OPTIONS`;
     - the document service's socket must be in `$INSTANTE_HOME/run`;
-  - **a JSON logger** on `console` with one sanitizer: database errors keep only code, constraint and table, and `Authorization` and `Cookie` headers are redacted;
+  - **a JSON logger** on `console` with one sanitizer: database errors keep only code, constraint and table (an error wrapping one keeps its own name and stack, not its message), and `Authorization` and `Cookie` headers are redacted. So are other credentials: tokens, keys, passwords and secrets by field name (in objects, `Headers` and name/value lists such as `rawHeaders`), and bearer tokens, Supabase session cookies and a URL's password inside any string. Bytes keep only their size, and the sanitizer never throws;
   - **`AppError`** with a contract error code;
   - **the clock and ids;**
   - **the document-service client,** over `node:http` to `DOCUMENTS_SOCKET`, with a total 25-second deadline, under the rewrite's 30.
