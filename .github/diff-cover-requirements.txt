@@ -1,0 +1,8 @@
+# diff-cover and every dependency, each pinned to a release at least 7 days old.
+# Installed with --no-deps, so nothing outside this list comes in.
+diff-cover==11.0.1
+chardet==7.7.0
+jinja2==3.1.6
+markupsafe==3.0.4
+pluggy==1.7.0
+pygments==2.21.0

@@ -37,8 +37,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      # The whole history, so diff-cover can compare with origin/main.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
@@ -50,8 +52,17 @@ jobs:
         run: pnpm typecheck
       - name: Lint, with the typed rules
         run: pnpm lint
-      - name: Tests
-        run: pnpm test
+      - name: Tests, with coverage
+        run: pnpm test:coverage
+      - name: Install diff-cover, every package pinned
+        run: |
+          python3 -m venv "$RUNNER_TEMP/diff-cover"
+          "$RUNNER_TEMP/diff-cover/bin/pip" install --no-deps -r .github/diff-cover-requirements.txt
+      # CONSTRAINTS.md: changed lines in the fixed scope at least 80% covered.
+      - name: Changed lines at least 80% covered
+        run: |
+          "$RUNNER_TEMP/diff-cover/bin/diff-cover" coverage/lcov.info \
+            --compare-branch=origin/main --fail-under=80
 
   guards:
     name: guards
