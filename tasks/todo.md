@@ -61,7 +61,7 @@
 
 - [ ] **T4: The guards**
   - **Does:**
-    - `scripts/floor-guard.sh`, adapted from the constraint-driven-development skill's reference. It covers every floor rule in [`CONSTRAINTS.md`](../CONSTRAINTS.md):
+    - `scripts/floor-guard.ts`, adapted from the constraint-driven-development skill's reference (TypeScript run by Node, as the reference is a Node script). It covers every floor rule in [`CONSTRAINTS.md`](../CONSTRAINTS.md):
       - the suppression comments and ESLint inline configuration;
       - stubs, empty `catch {}` and standing `TODO`s;
       - skipped, `.only` or deleted tests;
@@ -70,14 +70,14 @@
       - the backend reading a cookie;
       - `getSession()` outside `apps/web/lib/auth/token-provider.ts`;
       - edits that weaken the bar;
-    - `scripts/check-commits.sh`;
-    - `scripts/check-agent-settings.sh`, which fails on a `sandbox` key, an `allowRead`, or a non-deny rule naming `~/.instante` in committed `.claude/` files;
+    - `scripts/check-commits.ts`;
+    - `scripts/check-agent-settings.ts`, which fails on a `sandbox` key, an `allowRead`, or a non-deny rule naming `~/.instante` in committed `.claude/` files;
     - `.claude/settings.json`, denying `Read` and `Edit` of `~/.instante/**`;
     - gitleaks added to `check:fast`, the floor guard to `check:task`, and a `test` script;
     - CI's guard job: the three guards and their tests.
   - **Acceptance:** each guard fails on a planted case of every rule, and passes on a clean tree. The plants are made in temporary repositories by the tests, never committed. CI's first jobs pass on this pull request.
   - **Verify:** `pnpm test -- guards`; the pull request's checks.
-  - **Depends on:** T3. **Files:** `scripts/{floor-guard,check-commits,check-agent-settings}.sh`, `scripts/test/guards.test.ts`, `.claude/settings.json`, plus edits to `package.json`, `vitest.config.ts` and `ci.yml`. **Size:** M.
+  - **Depends on:** T3. **Files:** `scripts/{floor-guard,check-commits,check-agent-settings}.ts`, `scripts/test/guards.test.ts`, `.claude/settings.json`, plus edits to `package.json`, `vitest.config.ts` and `ci.yml`. **Size:** M.
 
 ### Checkpoint 1
 - [ ] A clean install, `check:fast` under 5 seconds, and CI's first jobs green on a pull request.

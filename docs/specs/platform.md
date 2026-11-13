@@ -312,8 +312,8 @@ The subcommands:
 
 ### Scripts, CI and runbooks
 - **Scripts:**
-  - `scripts/check-commits.sh`;
-  - `scripts/floor-guard.sh`, adapted from the constraint-driven-development skill's reference;
+  - `scripts/check-commits.ts` and `scripts/check-agent-settings.ts`;
+  - `scripts/floor-guard.ts`, adapted from the constraint-driven-development skill's reference (a Node script, as the reference is, so it's typed, linted and tested like the rest);
   - `scripts/dev-db.sh`, which creates the development roles on Homebrew's cluster, giving the owner role `CREATEDB` for template databases. It creates the `instante_dev` and `instante_test` databases from `template0` with the pinned locale;
   - `scripts/local/`, above, with its tests and the GitHub stub.
 - **`.github/workflows/ci.yml`,** on pushes and pull requests. It holds no secrets, because nothing deploys from CI. Its jobs, mostly in parallel:
@@ -389,7 +389,7 @@ instante/
       migrations/           0001_baseline.sql, 0002_skeleton.sql
       test/                 integration tests, fixtures, fakes; src/ never imports them
   packages/contract/src/    routes.ts, test-routes.ts, errors.ts, ids.ts
-  scripts/                  check-commits.sh, floor-guard.sh, dev-db.sh
+  scripts/                  check-commits.ts, check-agent-settings.ts, floor-guard.ts, dev-db.sh
     local/                  instante (setup, start, release, backup, restore, status, cli),
                             its tests, and the GitHub stub for test mode
   docs/guides/  docs/runbooks/

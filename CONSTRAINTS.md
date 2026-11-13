@@ -47,7 +47,7 @@ A floor guard, adapted from the constraint-driven-development skill's reference 
 | Shell scripts | No findings | ShellCheck over `scripts/` | CI |
 | Dependencies | Nothing at high or above | `osv-scanner scan source -r .` | CI, weekly |
 | Code security | No new ERROR findings | `semgrep scan --config p/default --baseline-commit <base> --error --metrics=off` | CI |
-| Commits | Authored and committed as the owner, no AI trailers | `scripts/check-commits.sh` | before push, CI |
+| Commits | Authored and committed as the owner, no AI trailers | `scripts/check-commits.ts` | before push, CI |
 | AI evals | Recorded replies replay on every run; a public repository replays synthetic fixtures only and keeps the real eval set outside it. The release gates in `docs/product.md` are checked on the held-out set before release (phase 4) | replay test; live eval from `evals/` | CI (replay), each slice and after prompt or model changes (live) |
 
 Three external opinions keep the bar honest, because the agent can't argue with them: osv-scanner reads a vulnerability database, axe encodes WCAG, and gitleaks matches known secret shapes. Everything else is judged by this project's own code and tests, and the owner specifies the isolation and prompt-privacy cases rather than the agent alone.

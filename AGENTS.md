@@ -29,7 +29,7 @@ Instante is built in the phases set out in [`docs/sdlc.md`](docs/sdlc.md). The c
   ```bash
   git log --format='%an <%ae> | %cn <%ce> | %(trailers:only,unfold)' origin/main..HEAD
   ```
-  `scripts/check-commits.sh` automates this once it exists.
+  `pnpm check:commits` (`scripts/check-commits.ts`) runs this check, and CI runs it on every push.
 - Merge only by fast-forward from the command line after CI passes on the branch (`git push origin <branch>:main`). Never use GitHub's merge, squash or rebase buttons: they change the committer.
 - Since 2026-11-13 the owner allows everyday git work on this repository without asking each time: commits, branches, pushes, and fast-forward merges to `main` after CI passes. Still ask first before a force push, deleting a remote branch, rewriting history that's already pushed, or changing GitHub settings (the ruleset on `main` included).
 

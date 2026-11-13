@@ -31,4 +31,14 @@ if [ "${#lintable[@]}" -gt 0 ]; then
   pnpm exec eslint -c eslint.fast.config.mjs --max-warnings 0 --no-warn-ignored "${lintable[@]}" || status=1
 fi
 
+# Secrets in the changed files, values never printed. CI scans the commits too.
+if command -v gitleaks >/dev/null 2>&1; then
+  for f in "${files[@]}"; do
+    gitleaks dir --redact --no-banner --log-level warn "$f" || status=1
+  done
+else
+  echo "check:fast: gitleaks isn't installed (brew install gitleaks)" >&2
+  status=1
+fi
+
 exit "$status"

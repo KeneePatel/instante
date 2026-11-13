@@ -13,8 +13,11 @@
     "typecheck": "tsc --noEmit -p . && pnpm -r typecheck",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "floor-guard": "node scripts/floor-guard.ts",
+    "check:commits": "node scripts/check-commits.ts",
+    "check:agent-settings": "node scripts/check-agent-settings.ts",
     "check:fast": "scripts/check-fast.sh",
-    "check:task": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm test:coverage"
+    "check:task": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm test:coverage && pnpm floor-guard && pnpm check:agent-settings && pnpm check:commits"
   },
   "devDependencies": {
     "@types/node": "26.6.6",

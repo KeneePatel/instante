@@ -66,7 +66,7 @@ instante/
     contract/   the route table: Zod request, response and error schemas, plus the id rules
   docs/         product, architecture, sdlc, decisions/, research/, specs/
   evals/        eval sets (anonymized) and the eval runner, run locally with the eval key
-  scripts/      check-commits.sh, the floor guard, dev-db.sh, local/ (the owner's `instante` command),
+  scripts/      check-commits.ts, floor-guard.ts, check-agent-settings.ts, dev-db.sh, local/ (the owner's `instante` command),
                 and from `tailoring` install-typst.sh (pinned, checksummed)
   .github/workflows/
 ```

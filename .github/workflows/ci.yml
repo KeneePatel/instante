@@ -53,6 +53,27 @@ jobs:
       - name: Tests
         run: pnpm test
 
+  guards:
+    name: guards
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # The whole history, so the guards can find the merge base with origin/main.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - name: Install from the lockfile
+        run: pnpm install --frozen-lockfile
+      - name: Floor guard
+        run: pnpm floor-guard
+      - name: Commits authored as the owner, no trailers
+        run: pnpm check:commits
+      - name: Agent settings
+        run: pnpm check:agent-settings
+
   gitleaks:
     name: gitleaks
     runs-on: ubuntu-24.04
