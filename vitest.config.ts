@@ -6,6 +6,12 @@ export default defineConfig({
     projects: [
       { test: { name: 'scripts', include: ['scripts/**/*.test.ts'] } },
       { test: { name: 'contract', include: ['packages/contract/src/**/*.test.ts'] } },
+      {
+        test: {
+          name: 'backend',
+          include: ['apps/backend/src/**/*.test.ts', 'apps/backend/test/**/*.test.ts'],
+        },
+      },
     ],
     coverage: {
       provider: 'v8',

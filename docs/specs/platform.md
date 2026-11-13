@@ -71,9 +71,9 @@ That keeps "patched the day it lands" possible without loosening the setting.
 | Name | Read by | Secret | Notes |
 |---|---|---|---|
 | `INSTANTE_ENV` | backend, web, scripts | no | `development`, `test` or `production`; only `instante start` sets `production` |
-| `INSTANTE_HOME` | scripts | no | see "The local stack" for when the default `~/.instante` may be used |
+| `INSTANTE_HOME` | scripts; every backend role in production | no | see "The local stack" for when the default `~/.instante` may be used. With `INSTANTE_ENV=production`, the backend, the document service and the cli refuse to start without it, so it's one of each process's allowed names |
 | `ROLE` | backend | no | `all`, `documents` or `cli` |
-| `LISTEN_ADDRESS`, `PORT` | backend | no | `127.0.0.1`; with `INSTANTE_ENV=production`, anything but loopback refuses to start |
+| `LISTEN_ADDRESS`, `PORT` | backend | no | `127.0.0.1`; anything else refuses to start, in every environment |
 | `ALLOWED_HOST` | web, backend | no | the one `Host` the web app answers: `instante.localhost:4310` for real use, `localhost:3000` in development, `localhost:4320` in test mode |
 | `DATABASE_URL_FILE` | backend (app role) | yes | in production, parsed with `pg`'s own parser; any host but `$INSTANTE_HOME/run` refuses to start |
 | `OWNER_DATABASE_URL_FILE` | `cli db migrate`, `pg-boss migrate`, dumps and `restore` only | yes | the owner role |
@@ -82,7 +82,7 @@ That keeps "patched the day it lands" possible without loosening the setting.
 
 `accounts` adds `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`, read at run time.
 
-**Reserved for real use:** ports 4310 and 4311 and the name `instante.localhost`. With any other `INSTANTE_ENV`, or any home but the default, the configuration and the launcher refuse them. A tab the owner left open on real use can then never reach another Instante run, such as a test, while the real stack is stopped. Test mode uses `127.0.0.1:4320` (opened as `localhost:4320`) and `127.0.0.1:4321`.
+**Reserved for real use:** ports 4310 and 4311 and the name `instante.localhost`. With any other `INSTANTE_ENV`, or any home but the default, the configuration and the launcher refuse them. The configuration takes the default from the account's own home folder, never `$HOME`, so a changed `$HOME` can only make it refuse. A tab the owner left open on real use can then never reach another Instante run, such as a test, while the real stack is stopped. Test mode uses `127.0.0.1:4320` (opened as `localhost:4320`) and `127.0.0.1:4321`.
 
 ## What gets built
 
@@ -134,9 +134,10 @@ That keeps "patched the day it lands" possible without loosening the setting.
 - **`kit`:**
   - **configuration,** parsed with Zod at start: `*_FILE` values read from files, and a production guard. With `INSTANTE_ENV=production`:
     - test routes and fake-AI mode refuse to start;
-    - the database URL, parsed with `pg-connection-string` (the parser `pg` uses), must name `$INSTANTE_HOME/run` as its host;
+    - the database URL, parsed with `pg-connection-string` (the parser `pg` uses), must name `$INSTANTE_HOME/run` as its host, and mustn't nest a second `connectionString`, which `pg` would parse again;
     - the listen address must be loopback;
-    - `process.version` must be the pinned Node, and `--disable-sigusr1` must be in `process.execArgv`;
+    - `process.version` must be the pinned Node, and `--disable-sigusr1` must be in `process.execArgv`, with no `--inspect*`, `--debug*` or `--no-disable-sigusr1` beside it in any spelling Node accepts (`_` for `-`, with or without a value), and no `NODE_OPTIONS`;
+    - the document service's socket must be in `$INSTANTE_HOME/run`;
   - **a JSON logger** on `console` with one sanitizer: database errors keep only code, constraint and table, and `Authorization` and `Cookie` headers are redacted;
   - **`AppError`** with a contract error code;
   - **the clock and ids;**

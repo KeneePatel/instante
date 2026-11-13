@@ -21,7 +21,7 @@
 
 ## Phase A: Foundation ([platform spec](../docs/specs/platform.md))
 
-- [ ] **T1: The root workspace**
+- [x] **T1: The root workspace**
   - **Does:**
     - the root `package.json`, with `packageManager: pnpm@12.18.0` and `engines.node`;
     - `pnpm-workspace.yaml`: `minimumReleaseAge: 10080`, lifecycle scripts blocked unless named, exact versions, `enableGlobalVirtualStore: false`;
@@ -32,7 +32,7 @@
   - **Verify:** `pnpm install`; `pnpm config list`; the pull request's checks.
   - **Depends on:** O0. **Files:** `package.json`, `pnpm-workspace.yaml`, `mise.toml`, `.gitignore`, `.env.example`, `.github/workflows/ci.yml`. **Size:** S.
 
-- [ ] **T2: The web scaffold, the install rules, and `next start` under the permission model**
+- [x] **T2: The web scaffold, the install rules, and `next start` under the permission model**
   - **Does:**
     - `pnpm create next-app@16.4.N apps/web --typescript --tailwind --eslint` and `pnpm dlx shadcn@4.23.N init -b base -p nova`, each pinned at least 7 days old;
     - the nested `pnpm-workspace.yaml` and lockfile merged into the root's;
@@ -45,7 +45,7 @@
   - **Verify:** `pnpm install --frozen-lockfile` from a fresh clone; `pnpm --filter @instante/web build`.
   - **Depends on:** T1. **Files:** `apps/web/**` (generated), `pnpm-workspace.yaml`. **Size:** M (mostly generated).
 
-- [ ] **T3: Types, lint, format and tests**
+- [x] **T3: Types, lint, format and tests**
   - **Does:**
     - `tsconfig.base.json` with the strict flags, and the web app's `tsconfig.json` extending it;
     - one root `eslint.config.mjs` replacing the scaffold's file: typed `strictTypeChecked`, the module-direction rules for `kit`, `domain`, `ai`, `documents`, `sources`, `store`, `engine` and the entry points, "`src/` never imports `test/`", `noInlineConfig` and `reportUnusedDisableDirectives`;
@@ -59,7 +59,7 @@
   - **Verify:** `time pnpm check:fast` after touching one file; `pnpm check:task`.
   - **Depends on:** T2. **Files:** `tsconfig.base.json`, `eslint.config.mjs`, `eslint.fast.config.mjs`, `prettier.config.mjs`, `vitest.config.ts`, `.github/workflows/ci.yml`. **Size:** M.
 
-- [ ] **T4: The guards**
+- [x] **T4: The guards**
   - **Does:**
     - `scripts/floor-guard.ts`, adapted from the constraint-driven-development skill's reference (TypeScript run by Node, as the reference is a Node script). It covers every floor rule in [`CONSTRAINTS.md`](../CONSTRAINTS.md):
       - the suppression comments and ESLint inline configuration;
@@ -80,11 +80,11 @@
   - **Depends on:** T3. **Files:** `scripts/{floor-guard,check-commits,check-agent-settings}.ts`, `scripts/test/guards.test.ts`, `.claude/settings.json`, plus edits to `package.json`, `vitest.config.ts` and `ci.yml`. **Size:** M.
 
 ### Checkpoint 1
-- [ ] A clean install, `check:fast` under 5 seconds, and CI's first jobs green on a pull request.
+- [x] A clean install, `check:fast` under 5 seconds, and CI's first jobs green on a pull request.
 
 ## Phase B: Backend core
 
-- [ ] **T5: The contract package** (**review:** the contract helper)
+- [x] **T5: The contract package** (**review:** the contract helper)
   - **Does:**
     - `packages/contract`, with `module: nodenext`, `erasableSyntaxOnly`, `allowImportingTsExtensions` and `noEmit`;
     - `defineRoute`, the one error shape (with `upstream_unavailable`), the id generator, `GET /api/ping`, and the separate `testRoutes` table;
@@ -93,11 +93,11 @@
   - **Verify:** `pnpm --filter @instante/contract test`; the pull request's checks.
   - **Depends on:** T4. **Files:** `packages/contract/src/{define-route,routes,test-routes,errors,ids}.ts`, `.github/workflows/ci.yml`. **Size:** M.
 
-- [ ] **T6: The backend package and its configuration**
+- [x] **T6: The backend package and its configuration**
   - **Does:**
-    - `apps/backend` (its tsconfig as the contract's), and `src/main.ts` reading `ROLE`;
+    - `apps/backend` (its tsconfig as the contract's). `src/main.ts`, reading `ROLE`, moved to T8, the first task with something to start;
     - `src/kit/config.ts`: Zod, `*_FILE` values read from files, and the production guard. The guard refuses:
-      - test routes and fake AI;
+      - test routes and fake AI (test routes exist only with `INSTANTE_ENV=test`; the fake-AI setting and its refusal arrive with the `ai` module);
       - a database URL, parsed with `pg-connection-string`, whose host isn't `$INSTANTE_HOME/run`;
       - a non-loopback address and the wrong Node;
       - a missing `--disable-sigusr1`;
@@ -105,7 +105,7 @@
       - a `DOCUMENTS_SOCKET` over 104 bytes.
   - **Acceptance:** each refusal has a test, including a URL whose `host=` points elsewhere.
   - **Verify:** `pnpm --filter @instante/backend test -- config`.
-  - **Depends on:** T5. **Files:** `apps/backend/src/main.ts`, `src/kit/config.ts`, `src/kit/config.test.ts`. **Size:** S.
+  - **Depends on:** T5. **Files:** `src/kit/config.ts`, `src/kit/config.test.ts`. **Size:** S.
 
 - [ ] **T7: The logger, errors, clock and ids**
   - **Does:** the JSON logger with one sanitizer, `AppError`, the clock and ids.
@@ -115,6 +115,7 @@
 
 - [ ] **T8: The API and its request checks** (**review:** fail-closed routes; the `Host`, `X-Forwarded-Host` and Fetch Metadata checks)
   - **Does:**
+    - `src/main.ts`, reading `ROLE` and the configuration (moved from T6);
     - `registerRoutes`, failing closed;
     - the middleware in the spec's order;
     - reply parsing with `Cache-Control` and `Vary`;
@@ -125,11 +126,11 @@
     - every `user` route answers 401, including encoded paths and trailing slashes;
     - each request check refuses its case.
   - **Verify:** `pnpm --filter @instante/backend test -- api unauthenticated`.
-  - **Depends on:** T7. **Files:** `src/api/{register-routes,middleware}.ts`, `src/api/handlers/{ping,test-routes}.ts`, `test/{api,unauthenticated-matrix}.test.ts`, `test/fixtures/file.pdf`. **Size:** M.
+  - **Depends on:** T7. **Files:** `src/main.ts`, `src/api/{register-routes,middleware}.ts`, `src/api/handlers/{ping,test-routes}.ts`, `test/{api,unauthenticated-matrix}.test.ts`, `test/fixtures/file.pdf`. **Size:** M.
 
 - [ ] **T9: The migration runner** (**review:** the runner)
   - **Does:**
-    - the `pg` pool for `instante_app`;
+    - the `pg` pool for `instante_app`, given `{ connectionString }` (a bare string is parsed twice), with `pg-connection-string` pinned to the version `pg` itself depends on, so the configuration's guard parses as `pg` does;
     - the runner with `schema_migrations`, failing on a gap, an unknown name, a changed file and the wrong locale;
     - `0001_baseline.sql` and `0002_skeleton.sql`;
     - `cli db migrate` (step 1) and `db status`;

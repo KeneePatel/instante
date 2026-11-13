@@ -1,0 +1,18 @@
+{
+  "name": "@instante/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run --root ../.. --project backend",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@instante/contract": "workspace:*",
+    "pg-connection-string": "2.14.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6"
+  }
+}

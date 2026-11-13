@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 // The install rules and exact versions are part of the quality bar: this test fails
@@ -32,9 +32,30 @@ describe('pnpm-workspace.yaml', () => {
 });
 
 describe('package.json files', () => {
-  const manifests = ['package.json', 'apps/web/package.json'];
+  // Every manifest the workspace globs (apps/*, packages/*) take in, plus the root's.
+  const manifests = [
+    'package.json',
+    ...['apps', 'packages'].flatMap((folder) =>
+      readdirSync(new URL(`${folder}/`, root), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => `${folder}/${entry.name}/package.json`)
+        .filter((path) => existsSync(new URL(path, root))),
+    ),
+  ];
 
-  it.each(manifests)('%s pins every dependency to an exact version', (path) => {
+  it('finds every package the workspace globs take in, so a new one is checked too', () => {
+    expect(manifests).toEqual(
+      expect.arrayContaining([
+        'package.json',
+        'apps/web/package.json',
+        'apps/backend/package.json',
+        'packages/contract/package.json',
+      ]),
+    );
+    expect(workspace).toMatch(/^packages:\n {2}- apps\/\*\n {2}- packages\/\*\n/m);
+  });
+
+  it.each(manifests)('%s pins every dependency to an exact version or the workspace', (path) => {
     const manifest = JSON.parse(readFileSync(new URL(path, root), 'utf8')) as Record<
       string,
       Record<string, string> | undefined
@@ -44,6 +65,11 @@ describe('package.json files', () => {
       ...manifest['devDependencies'],
     };
     for (const [name, version] of Object.entries(versions)) {
+      // Our own packages come from the workspace, never from the registry.
+      if (name.startsWith('@instante/')) {
+        expect(version, name).toBe('workspace:*');
+        continue;
+      }
       expect(version, name).toMatch(/^\d+\.\d+\.\d+$/);
     }
   });
