@@ -115,18 +115,18 @@
 
 - [ ] **T8: The API and its request checks** (**review:** fail-closed routes; the `Host`, `X-Forwarded-Host` and Fetch Metadata checks)
   - **Does:**
-    - `src/main.ts`, reading `ROLE` and the configuration (moved from T6);
+    - `src/main.ts`, reading `ROLE` and the configuration (moved from T6), through `src/start.ts` so tests can start it in-process;
     - `registerRoutes`, failing closed;
-    - the middleware in the spec's order;
+    - the middleware in the spec's order, with the request id first so each refusal is logged with one, and per route: sign-in, then the body limit, the JSON check and validation;
     - reply parsing with `Cache-Control` and `Vary`;
     - `/healthz`, the ping handler, and the test-route handlers (`echo`, `slow` sending nothing at all, `user-only`, and the fixture PDF);
-    - the unauthenticated matrix, generated from the tables, with an `authenticate` that refuses every token.
+    - the unauthenticated matrix, generated from the tables, with an `authenticate` that refuses every token. A path no route matches asks for sign-in first, so no spelling of a `user` route's path gets past it.
   - **Acceptance:**
     - a route without `auth` or a handler fails to register, and test routes don't register in production (platform spec 4);
     - every `user` route answers 401, including encoded paths and trailing slashes;
     - each request check refuses its case.
   - **Verify:** `pnpm --filter @instante/backend test -- api unauthenticated`.
-  - **Depends on:** T7. **Files:** `src/main.ts`, `src/api/{register-routes,middleware}.ts`, `src/api/handlers/{ping,test-routes}.ts`, `test/{api,unauthenticated-matrix}.test.ts`, `test/fixtures/file.pdf`. **Size:** M.
+  - **Depends on:** T7. **Files:** `src/{main,start}.ts`, `src/api/{app,register-routes,middleware}.ts`, `src/api/handlers/{ping,test-routes}.ts` (the fixture PDF is built there, since `src/` takes nothing from `test/`), `test/{api,unauthenticated-matrix,start}.test.ts`. **Size:** M.
 
 - [ ] **T9: The migration runner** (**review:** the runner)
   - **Does:**
