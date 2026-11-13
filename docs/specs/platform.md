@@ -266,7 +266,12 @@ The subcommands:
   - starts each process from `current`, with `env -i` plus its allowed names, the absolute Node path, `--disable-sigusr1` on its command line, and output to `logs/<start>-<process>.log`, keeping the last 10 starts and starting a new file when one passes 20 MB:
     - the document service on its socket;
     - the backend on `127.0.0.1:4311`;
-    - the web app as `node --disable-sigusr1 --permission --allow-fs-read=<the release folder> --allow-net <the release>/apps/web/node_modules/next/dist/bin/next start -H 127.0.0.1 -p 4310`. If Next also needs `--allow-addons`, the slice records why; if it can't run under the permission model at all, the owner decides between a wider grant and accepting the risk;
+    - the web app as `node --disable-sigusr1 --permission --allow-fs-read=<the release folder> --allow-net <the release>/apps/web/node_modules/next/dist/bin/next start --experimental-next-config-strip-types -H 127.0.0.1 -p 4310`, with `NEXT_PRIVATE_OUTPUT_TRACE_ROOT=<the release folder>` and `NEXT_TELEMETRY_DISABLED=1`. Tried in T2 on Next.js 16.4.5:
+      - the strip-types flag loads `next.config.ts` with Node's own type stripping, so no native SWC addon is needed (the permission model refuses addons);
+      - the root variable stops Next's search for a workspace root above the release folder, which reads outside the grant;
+      - it needs no `--allow-addons`, no write grant, no workers and no child processes.
+
+      The root variable is private to Next.js: if an upgrade drops it, the start fails on the permission model, and T19's test shows it;
   - checks with `lsof` that every listener is on loopback;
   - traps `HUP`, `INT` and `TERM`, and polls its children: on any of them, or when one process exits, it stops the others, then the cluster with `pg_ctl -m fast stop`.
 - **`instante release <commit>`:** the seven steps in ADR-012:

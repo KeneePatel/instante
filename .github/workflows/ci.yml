@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+# Next.js sends anonymous telemetry to Vercel unless this is set.
+env:
+  NEXT_TELEMETRY_DISABLED: 1
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true

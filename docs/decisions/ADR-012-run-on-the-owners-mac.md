@@ -73,7 +73,7 @@ Accepted 2026-11-13. At the phase 2 gate the owner chose to run Instante on thei
 
   | Process | Listens on | Runs as |
   |---|---|---|
-  | web | `127.0.0.1:4310` | `next start -H 127.0.0.1 -p 4310` under Node's permission model, reading only its release folder |
+  | web | `127.0.0.1:4310` | `next start -H 127.0.0.1 -p 4310` under Node's permission model, reading only its release folder (confirmed in T2: it needs only `--allow-net`, with the config loaded by type stripping) |
   | backend (`ROLE=all`) | `127.0.0.1:4311` | Node on the backend's `.ts` source; it holds the secrets, so no permission flags |
   | document service (`ROLE=documents`) | the socket `run/documents.sock` | Node, with only its own environment names; its task children under the permission model |
 

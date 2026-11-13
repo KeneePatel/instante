@@ -12,6 +12,11 @@ minimumReleaseAgeStrict: true
 # Dependencies' build scripts stay blocked unless a version is named in allowBuilds,
 # and an unreviewed one fails the install.
 strictDepBuilds: true
+allowBuilds:
+  # Denied, as create-next-app sets them: sharp only serves image optimization, which
+  # is off, and unrs-resolver ships prebuilt binaries.
+  sharp: false
+  unrs-resolver: false
 
 # package.json records exact versions, never ranges.
 saveExact: true
