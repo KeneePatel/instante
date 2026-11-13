@@ -317,8 +317,8 @@ The owner also made Instante a personal project rather than a product launch. Th
 
 [`sdlc.md`](sdlc.md) lists these with their phases:
 - **Phase 2:**
-  - the host and its budget;
-  - where the production database runs: on the host (recommended) or in the Supabase project ([ADR-003](decisions/ADR-003-one-postgres-database.md));
+  - the host and its budget, and where the production database runs ([ADR-011](decisions/ADR-011-host.md), proposed);
+  - whether to buy a domain before the first real sign-in on production (recommended);
   - the final success-criteria numbers and the eval's size;
   - the retention windows;
   - the list-requirement rule and the eligibility rules offered;

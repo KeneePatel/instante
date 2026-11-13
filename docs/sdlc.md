@@ -1,6 +1,6 @@
 # How Instante gets built
 
-**Now:** phase 1, *Discover and decide*, signed off by the owner on 2026-11-13. Phase 2, *Foundations*, is next and starts in a new turn.
+**Now:** phase 2, *Foundations*, started 2026-11-13. Its drafts wait for the owner (the list under [Phase 2](#phase-2-foundations)). Phase 1 was signed off on 2026-11-13.
 
 Instante is built in five phases. Each version goes round them again: version 1 is the smallest product that's useful for one job search, and complexity comes in later versions, only when a trigger in [`architecture.md`](architecture.md#later-and-what-triggers-it) is measured. A phase ends at a gate that only the owner can sign off, and the next phase never starts in the same turn ([`AGENTS.md`](../AGENTS.md)).
 
@@ -24,8 +24,8 @@ The estimates assume an AI agent writes the code and the owner reviews about 5 t
 
 | Module | Slices | The owner reads line by line | Owner hours |
 |---|---|---|---|
-| `platform` (walking skeleton) | 6 | the contract helper, store scoping, the document service, the migration runner and the first migrations | 4.5 |
-| `accounts` | 5: Supabase projects and checks; sign-in page with the authenticator step; token verification and the key cache; accounts and owner commands, deletion included; the fake Supabase for tests | token verification, account linking, the disabled and two-factor checks, deletion | 4 |
+| `platform` (walking skeleton) | 12 ([its spec](specs/platform.md#sizing)) | the contract helper, store scoping, the migration runner, the document service's isolation, `compose.yaml`, the `DOCKER-USER` unit, `cloud-init`'s `sshd` and firewall, the deploy script | 7 |
+| `accounts` | 5: the Supabase checks; the fake Supabase; token verification and the key cache; the sign-in pages and `proxy.ts`; accounts, owner commands and deletion | the verifier and key cache, account linking, the `proxy.ts` session logic, deletion | 4 |
 | `settings` | 2 | none | 0.5 |
 | `ai` | 3 | the ledger and pauses | 1.5 |
 | `job-pool` | 6 | fetch allowlist, places parser | 2 |
@@ -38,22 +38,23 @@ The estimates assume an AI agent writes the code and the owner reviews about 5 t
 | Isolation and prompt-privacy cases | | | 3 |
 | Setup: repository, Anthropic workspaces, Supabase projects, host | | | 3 |
 | The alpha: real use and its findings | | | 5 |
-| **Phase 3 total** | **42** | | **about 54** |
+| **Phase 3 total** | **48** | | **about 57** |
 
-At 6 hours a week, phase 3's owner time is about 9 weeks, so the timebox is 9 to 11 weeks. Phase 2 is about 10 owner hours, and phase 4 about 8.
+At 6 hours a week, phase 3's owner time is about 9.5 weeks, so the timebox is 10 to 12 weeks. Phase 2 is about 10 owner hours, and phase 4 about 8. The fresh-context review of `platform`'s spec found it about twice the size first estimated; the other modules' slice counts are re-checked when each spec is written.
 
 **Cut line:** three items are built as the last slices of phase 3, so they can still be cut when the time comes:
 - the Applied list's status and notes (Mark applied stays);
 - restoring the import snapshot;
 - the review screen's coverage list.
 
-If the projected end passes week 11 at a module's spec approval, the owner decides then which of them move to "Later", instead of the timebox stretching.
+If the projected end passes week 12 at a module's spec approval, the owner decides then which of them move to "Later", instead of the timebox stretching.
 
 ## Review policy
 
 - **Read line by line by the owner** (this one list also sets the sizing above; each item sits in the module named):
   - the contract helper's fail-closed auth (`platform`);
-  - token verification, the key cache, account linking, and the disabled and two-factor checks (`accounts`);
+  - the server's isolation and deploy path: `compose.yaml`, the `DOCKER-USER` unit, `cloud-init`'s `sshd` and firewall settings, and the deploy script (`platform`);
+  - token verification, the key cache, account linking, the `proxy.ts` session logic, and the disabled and two-factor checks (`accounts`);
   - store-layer scoping and the job visibility rule (`platform`, then each module);
   - deletion (`accounts`);
   - the AI view, its patterns and placeholders;
@@ -114,27 +115,63 @@ If the projected end passes week 11 at a module's spec approval, the owner decid
 
 ## Phase 2: Foundations
 
-Entry: phase 1 signed off.
+Entry: phase 1 signed off (2026-11-13). Started 2026-11-13. Drafts are linked below; each waits for the owner.
 
 1. **Machine setup, with the owner's yes:**
-   - `pnpm self-update 12`, before any scaffold;
-   - a `mise.toml` pinning Node 26 (already installed);
-   - Homebrew `postgresql@18`;
-   - Typst through `scripts/install-typst.sh`, with a pinned version and SHA-256.
-2. **The host:** choose the vendor for hosting model (a), against the criteria in [`architecture.md`](architecture.md#environments), and record it as ADR-011. It also decides where the production database runs: on the host (recommended), or in the production Supabase project ([ADR-003](decisions/ADR-003-one-postgres-database.md)).
-3. **Threat model:** trust boundaries and abuse cases per flow, with the Next.js process treated as a holder of live sessions, Supabase's script-readable session cookie, and the document service's residual risk stated.
-4. **Retention:** the windows from [`architecture.md`](architecture.md#data) as proposals, each with its purpose. The privacy notice waits for the checklist in [`product.md`](product.md#before-anyone-else-uses-it).
-5. **Owner decisions:**
-   - the final success-criteria numbers, and the eval's size (a tighter screening gate needs about three times the labelling);
-   - the list-requirement rule and the eligibility rules offered;
-   - whether a withheld line may be released;
-   - the spend threshold for the Batch API;
-   - Cache Components on or off (off recommended, for a nonce-based CSP that guards Supabase's script-readable session);
-   - error tracking or not.
-6. **CONSTRAINTS.md:** the four questions of the constraint-driven-development interview, with defaults.
-7. **For `platform` and `accounts` only:** the specs (`docs/specs/platform.md`, `docs/specs/accounts.md`), low-fidelity screens for sign-in, the dependency list, and `tasks/plan.md` and `tasks/todo.md`.
+   - `pnpm self-update 12.18.0`, before any scaffold. pnpm 12 has been stable since 2026-08-26; the Mac has 10.18.2;
+   - a `mise.toml` pinning Node 26.13.1, the current Active LTS (the Mac has 26.13.0);
+   - `brew install postgresql@18` (18.7);
+   - `brew install gitleaks`, because it runs after every edit. osv-scanner and Semgrep run in CI only, which keeps the Mac clean;
+   - Typst moves to the `platform` slice, where `scripts/install-typst.sh` is written and reviewed. It pins 0.15.1 by the SHA-256 digests GitHub publishes for each release file.
+2. **The host:** [ADR-011](decisions/ADR-011-host.md), including where the production database runs.
+3. **Threat model:** [`threat-model.md`](threat-model.md).
+4. **Retention:** [the retention table](architecture.md#retention-with-purposes), each window with its purpose. The privacy notice waits for the checklist in [`product.md`](product.md#before-anyone-else-uses-it).
+5. **Owner decisions,** each with a recommendation:
 
-Gate: items 2 to 7 approved.
+   | # | Decision | Recommendation | Recorded in |
+   |---|---|---|---|
+   | D1 | Success-criteria numbers and the eval's size | Keep the proposed targets and the 150-pair eval (100 tuning, 50 held out). A tighter screening gate needs about three times the labelling | `product.md` |
+   | D2 | The list-requirement rule | Accept [ADR-007](decisions/ADR-007-screening-one-call-verdict-in-code.md)'s rule 6 as written: met when every item is shown (any one, for "one of"), partly when some are | ADR-007 |
+   | D3 | The eligibility rules offered | All five (sponsorship, clearance, French, graduated, maximum years), each off until turned on | `product.md` |
+   | D4 | Whether a withheld line may be released | No in v1: rephrase it instead. A release switch would let status statements reach the screener, which the standing rule forbids. Trigger: withheld-line reports show the patterns hiding real evidence | ADR-008 |
+   | D5 | The spend threshold for the Batch API | AI spend above $50 a month, two months running | ADR-010, the limits table |
+   | D6 | Cache Components | Off. Every page here is per-person anyway, and it allows a nonce-based CSP, the one CSP that stops an injected script from reading Supabase's session | ADR-005, `CONSTRAINTS.md` |
+   | D7 | Error tracking | None in v1: the host's logs through the sanitizer, plus UptimeRobot and Healthchecks.io for liveness, which receive no personal data. Trigger: an error the logs couldn't explain, twice | `architecture.md` |
+   | D8 | A domain | Buy one (about $15 a year) before the first real sign-in on production, the end of `accounts`, with DNS at DigitalOcean, CAA records and two-factor sign-in at the registrar. A shared sslip.io hostname lets its operators point the address elsewhere with a valid certificate and collect sessions, so it's only for the data-free walking skeleton | ADR-011 |
+
+6. **`CONSTRAINTS.md`:** the constraint-driven-development interview. There's no code or CI yet; the stack (TypeScript, Vitest, ESLint, Prettier) is decided. The four questions, each with the draft's answer as its default:
+   - **Q1, which dimensions beyond the floor are enforced?** Default: coverage of changed lines; security (gitleaks, osv-scanner, Semgrep); accessibility (axe on every page); module boundaries (ESLint); and the project's own rows (isolation, unauthenticated access, tokens, caching, prompt privacy, the document service, placeholders, logs, the image, models). Performance is measured, not enforced, until there's a deployed URL to measure.
+   - **Q2, block or warn when a check fails mid-task?** Default: the floor blocks from the first commit; each new numbered row warns for two weeks, then blocks.
+   - **Q3, target numbers, or measure and hold?** Default: the skill's defaults where there's nothing to measure yet. Changed lines at least 80% covered; nothing high or above from osv-scanner; zero critical or serious axe findings. Project coverage is held at its first measured value, with 0.5% tolerance.
+   - **Q4, the slowest check before work comes back?** Default: `check:fast` under 5 seconds after every edit, `check:task` under 90 seconds at the end of a task, and no limit in CI.
+7. **Specs for `platform` and `accounts`:** [`docs/specs/platform.md`](specs/platform.md) and [`docs/specs/accounts.md`](specs/accounts.md), with the sign-in screens and the dependency list.
+8. **After the owner approves item 7, in a later turn:** `tasks/plan.md` and `tasks/todo.md`. The spec-driven-development skill never plans in the turn that writes the spec.
+
+**Reviews of these drafts, 2026-11-13:** two fresh-context critics read them, one for security and operations and one for the specs. Each finding was checked against Docker's, OpenSSH's, Next.js's, pg-boss's and Node's documentation or source, then fixed:
+- **Security and operations:** 12 findings, 9 major. The fixes:
+  - the deploy key restricted;
+  - a domain before any real sign-in (D8);
+  - the database fenced to the backend;
+  - the document service's network gateway isolated;
+  - rollback across migrations;
+  - secrets moved to per-service files;
+  - the document service hardened;
+  - logs capped.
+- **The specs:** 12 findings, 2 blockers and 9 major. The fixes:
+  - the on-server checks run on a test-mode stack;
+  - one web image for every environment;
+  - the document service's read paths and probes;
+  - the real queue pattern;
+  - grants for pg-boss;
+  - the sign-in pages keep the CSP;
+  - early session refresh;
+  - outage-safe `proxy.ts`;
+  - the missing spec sections;
+  - `platform` re-sized to 12 slices.
+
+The outcomes are in ADR-011's "Doubts raised" and in the specs themselves.
+
+Gate: items 1 to 8 approved.
 
 ## Phase 3: Build in slices
 
@@ -148,24 +185,12 @@ Entry: phase 2 signed off.
    - the scaffold, the contract package, the database and migration runner, CI with the floor and gates, the document service;
    - a production deploy without data. Its database is disposable, and the owner recreates it whenever an applied migration changes; the runner's checks are never loosened.
 
-   Its acceptance criteria are the host and design checks:
-   - the `Authorization` header passes through the rewrite unchanged, and no `Cookie` header reaches the backend;
-   - a page rendered with an access token about to expire is refreshed once, in `proxy.ts`, and doesn't sign the person out;
-   - `proxy.ts` refreshes a session from the development Supabase project on the host;
-   - a cacheable reply isn't stored;
-   - a 6 MB upload gets `413`;
-   - a PDF preview and a download work through the typed helper, a `Blob` and an object URL, since links can't carry a bearer token;
-   - a 35-second silent request fails cleanly;
-   - web, backend and document service fit in 70% of the instance's memory at idle;
-   - the document service holds no secrets and can't connect to the database, and its children can't start a process;
-   - a route without declared auth fails to register;
-   - a pg-boss job created in a request transaction completes in a handler transaction;
-   - the production image boots.
-
-   A failure reopens ADR-001, ADR-002 or ADR-005 here, while the cost is one module.
+   Its acceptance criteria are the walking-skeleton checks in [its spec](specs/platform.md#acceptance-criteria): CI checks, then checks on the server with the same images and no data. A failure reopens ADR-001, ADR-002, ADR-005 or ADR-011 here, while the cost is one module.
 2. **`accounts`:** the two Supabase projects and their settings, the sign-in page with the authenticator step, token verification and the key cache, accounts and owner commands for people, and the fake Supabase for tests ([ADR-004](decisions/ADR-004-supabase-auth.md)).
    - It starts by confirming on the development project what ADR-004 read from Supabase's source: a dashboard-created, confirmed user signs in by code with sign-ups off, and the token reaches `aal2` after the authenticator step.
-   - It ends with the owner's review of the verifier, the key cache, account linking and deletion.
+   - Its session-refresh checks (a page near token expiry refreshes once in `proxy.ts`, on the fake and on the development project) are in [its spec](specs/accounts.md#acceptance-criteria).
+   - Before the first real sign-in on production, there's a domain with CAA records (decision D8).
+   - It ends with the owner's review of the verifier, the key cache, account linking, the `proxy.ts` session logic and deletion.
 3. **`settings`, then `ai` and `job-pool`.**
 4. **`master-resume`.** It includes a small import eval (10 fixture resumes, including two-column layouts), from which the import model is chosen ([ADR-010](decisions/ADR-010-claude-models-are-configuration.md)).
 5. **`screening`.** It includes the screening eval:

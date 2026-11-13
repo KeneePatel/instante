@@ -22,10 +22,10 @@ Accepted 2026-11-13: the owner chose hosting model (a) at the phase 1 gate. Prop
 ## Decision
 - **Hosting model (a), the owner's choice:** the web app (`next start`) and the backend run on one host. Only the web app is public; the backend and the database sit on the private network. The vendor is chosen in phase 2 against the criteria in [`architecture.md`](../architecture.md#environments), and the walking skeleton deploys there.
 - **Wiring:**
-  - `next.config.ts` rewrites `/api/:path*` to `${BACKEND_INTERNAL_URL}/api/:path*`. Each environment builds its own web app, and the server exits at start if the built-in destination differs from `BACKEND_INTERNAL_URL`.
+  - `next.config.ts` rewrites `/api/:path*` to `${BACKEND_INTERNAL_URL}/api/:path*`. The destination is fixed at build time, so it's the same Compose name (`http://backend:8080`) everywhere and one web image serves CI and production; the server exits at start if the built-in destination differs from `BACKEND_INTERNAL_URL`.
   - Browser writes are Client Components calling `/api/...`.
   - Server Components read the backend directly with the person's access token as a bearer token, `cache: 'no-store'`, inside Suspense. The backend never reads or sets cookies.
-  - `proxy.ts` refreshes the Supabase session with `getClaims()` and redirects to sign-in when there's none ([ADR-004](ADR-004-supabase-auth.md)). Its matcher covers every page except `/sign-in`, static assets and `/api`, so API calls get a 401 rather than a redirect.
+  - `proxy.ts` refreshes the Supabase session with `getClaims()` and redirects to sign-in when there's none ([ADR-004](ADR-004-supabase-auth.md)). Its matcher covers every page, sign-in included, and leaves out `/api`, static assets and prefetches, so API calls get a 401 rather than a redirect; the sign-in pages skip only the session redirects.
   - The typed fetch helper sends `credentials: 'omit'`, so Supabase's cookies never reach the backend.
 - **Not in v1:**
   - Server Actions;
@@ -78,6 +78,10 @@ Single-model reviews; the owner chose to skip a cross-model second opinion.
   - "The Route Handler guard covered only `app/api`": valid. It now covers any `route.ts` or `route.js`.
   - "A download that stores bytes can't be a GET": valid. It's a `POST`.
   - "`contract.json` churns before release": valid. It starts in the release phase.
+
+- **Phase 2 spec review, 2026-11-13:**
+  - "A web image with build-time values can't be the one CI tested": valid. The rewrite targets the same Compose name everywhere, and Supabase's values are read at run time.
+  - "The sign-in pages lost the CSP": valid. One matcher covers every page.
 
 ## Revisit when
 - A walking-skeleton acceptance test fails on the chosen host.

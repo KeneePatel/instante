@@ -39,7 +39,7 @@ TypeScript on Node.js 26 LTS, in the same pnpm workspace as the web app.
 | AI | The official `@anthropic-ai/sdk`: `client.beta.messages.parse` with the Zod schema as the output format (the beta endpoint, because the refusal fallback is a beta parameter; [ADR-010](ADR-010-claude-models-are-configuration.md)) |
 | Documents | unpdf (PDF text layer), mammoth (DOCX), turndown (HTML to Markdown), all in the document service ([ADR-001](ADR-001-separate-backend.md)); the Typst CLI, installed by a pinned, checksummed script |
 | Sign-in | Supabase Auth; `jose` verifies its tokens against a key set the backend caches ([ADR-004](ADR-004-supabase-auth.md)) |
-| Checks | `tsc --noEmit` (TypeScript 5.9 pinned until typescript-eslint supports 7); ESLint with typescript-eslint `strictTypeChecked`; Prettier; Vitest |
+| Checks | `tsc --noEmit` (TypeScript 6.0 pinned: typescript-eslint 8.72 accepts below 6.1, and TypeScript 7 waits until it supports 7); ESLint with typescript-eslint `strictTypeChecked`; Prettier; Vitest |
 
 - **No build step:** the backend runs its `.ts` files with Node's type stripping, with `erasableSyntaxOnly` and `verbatimModuleSyntax` set.
 - **Deploys:** images are built from the whole workspace, with symlinks intact, never with `pnpm deploy`. Node won't strip types under `node_modules`. CI boots the production image.

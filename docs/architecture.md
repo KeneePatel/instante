@@ -100,14 +100,14 @@ api · worker · documents · cli   entry points: Hono routes from the contract 
   - The backend registers handlers only through a helper that reads the table. It fails closed (no auth declared means no route), validates the request, parses the reply through the response schema, and sets `Cache-Control: private, no-store` and `Vary: Authorization`.
   - The web app calls the backend through a small typed fetch built on the same table. It never imports `apps/backend`.
   - From the release phase on, a JSON Schema snapshot of the table (`contract.json`) is committed, and removals or renames ship in two deploys.
-- **A page:** `proxy.ts` refreshes the Supabase session first. Its matcher covers every page except `/sign-in`, static assets and `/api`, so an API call gets a 401, never a redirect, and sign-in can't loop. Next.js then renders the page on the server; Server Components read the token without refreshing it, because only `proxy.ts` may write the session cookies. Each Server Component read calls `GET {BACKEND_INTERNAL_URL}/api/...` with the person's access token as a bearer token, `cache: 'no-store'`, inside Suspense.
+- **A page:** `proxy.ts` sets the nonce CSP and refreshes the Supabase session first, early enough (within 5 minutes of expiry) that a render never needs to. Its matcher covers every page, sign-in included, and leaves out `/api`, static assets and prefetches, so an API call gets a 401, never a redirect; the sign-in pages skip the session redirects, so sign-in can't loop. Next.js then renders the page dynamically; Server Components read the token without refreshing it, because only `proxy.ts` may write the session cookies. Each Server Component read calls `GET {BACKEND_INTERNAL_URL}/api/...` with the person's access token as a bearer token, `cache: 'no-store'`, inside Suspense.
   - The backend never reads or sets cookies.
   - A 401 redirects to sign-in, a `403 unknown_account` to a page that says so, and unfinished onboarding to onboarding.
 - **An action:** a Client Component calls `/api/...` on the same origin with the bearer token, and `next.config.ts` rewrites it to the backend. v1 has no Server Actions and no Route Handlers.
 - **The token:** one typed fetch helper is the only code that reads it, and the web app makes no authorization decision from it.
   - The helper sends `credentials: 'omit'`, so Supabase's cookies, which hold the refresh token, never travel to the backend. The backend also drops any `Cookie` header before its first middleware.
   - After a 401, the helper lets Supabase's browser client refresh the session once, then retries once.
-- **The backend address:** the rewrite destination is fixed when the web app is built, so each environment builds its own. At start, the web server exits if the built-in destination differs from `BACKEND_INTERNAL_URL`.
+- **The backend address:** the rewrite destination is fixed at build time, so it's the same Compose name, `http://backend:8080`, in CI and on the server, and one web image serves every environment. At start, `instrumentation.ts` exits if `BACKEND_INTERNAL_URL` differs from the built-in destination. Supabase's URL and key are read at run time, not as `NEXT_PUBLIC_` values.
 - **Errors:** one shape, `{ "error": { "code", "message", "details" } }`. Validation failures are 422 with field details.
 - **Long work:** the API answers `202` with the subject's id. The page polls the subject (`GET resume-imports/{id}`, `GET tailored-resumes/{id}`, or `GET jobs/counts` for screening) every 2 seconds, then every 5. After 10 minutes it shows "taking longer than expected".
 
@@ -181,7 +181,7 @@ These hold no user ids, apart from a pasted posting's owner.
 | `app_user` | our id; `auth_subject` (Supabase's user id, unique, set by `users add` and `users relink`); email (normalized, unique); disabled at; onboarding finished | until the account is deleted |
 | `settings` | one row: search, eligibility rules, screening and resume sections as validated `jsonb`, and a version | with the account |
 | `master_resume` | `contact` (`jsonb`, its own column: name, email, phone, city, links), `doc` (`jsonb`), schema version, version for optimistic locking | with the account |
-| `master_resume_snapshot` | the master as it was before an import replaced it | the latest one |
+| `master_resume_snapshot` | the master as it was before an import replaced it | the latest one, for 30 days |
 | `resume_import` | status, kind (PDF, DOCX, text), file reference, the draft, flags, the statements moved out (work status and similar) for review; the text layer only while the import runs | the text layer and the file at the end of the import (24 hours at most); the row on accept or discard, or after 7 days |
 | `screening` | written by the worker: status (queued, running, judged, filtered, paused, not screened for refusals only, failed with an error code), the filter rule, verdict, the share and its basis, rank, the analysis (`jsonb`: requirements, facts with their quotes, matches with cited ids and their text, requirements not assessed), provenance (requested and serving model, prompt version, effort, inference location, AI-view hash, settings hash, rules version), stale, judged at | deleted with its job or the account |
 | `user_job` | written by the person: state (saved, skipped, applied), own verdict, brought back, applied at, application status, note, the sent resume and the frozen download (composite keys, set to null on delete), and a snapshot of company, title and link taken when saved or applied | with the account; rows whose job is gone are deleted unless applied |
@@ -207,7 +207,7 @@ Blocking a board (`sources block`) deletes the board's jobs and reports. `screen
 |---|---|---|
 | `ai_call` | one row per attempt (from the API's `usage.iterations`): user (set to null at account deletion), task, requested and serving model, effort, inference location, stop reason, refusal category, tokens (input, cache write, cache read, output), cost in micro-dollars, latency, request id. Never prompt or reply text | 90 days |
 | `ai_pause` | the AI pause state: reason (90% budget, budget used, spend limit reached), since, lifted at | latest row |
-| `audit_event` | account creation, relinking, disabling and deletion, the first sign-in, settings changes: actor, action, request id, time. No IP addresses. The user link is removed at account deletion, except one "account deleted" event that names no email | 12 months |
+| `audit_event` | account creation, relinking, disabling and deletion, email changes, settings changes: actor, action, request id, time. No IP addresses. The user link is removed at account deletion, except one "account deleted" event that names no email | 12 months |
 
 pg-boss keeps its own tables. Payloads carry ids only, never email addresses or resume text. Finished jobs are kept 7 days and failed jobs 30.
 
@@ -220,6 +220,34 @@ pg-boss keeps its own tables. Payloads carry ids only, never email addresses or 
 - IP addresses.
 - Anything in the Anthropic Files API: files are sent inline.
 
+### Retention, with purposes
+
+Phase 2 proposals for the owner to approve. Each window has a purpose; data is kept no longer than the purpose needs. Every row is deleted by the daily `retention` job unless it says otherwise.
+
+| Data | Kept | Purpose |
+|---|---|---|
+| Open jobs | while open | the pool people screen |
+| Closed jobs | 30 days, or while a saved or applied `user_job`, a `tailored_resume` or a `verdict_report` references them | a board glitch can reopen them; jobs the person acted on stay readable |
+| `fetch_log` | 30 days | collection health and `sources report` |
+| `app_user`, `settings`, `master_resume` | until the account is deleted | the account itself |
+| `master_resume_snapshot` | the latest one, for 30 days | undo an import |
+| Uploaded files and text layers | until the import ends, 24 hours at most | build the draft; no copy of the file lingers |
+| `resume_import` rows | until accepted or discarded, 7 days at most | review the draft |
+| `screening` rows | with their job or the account | the verdict's evidence |
+| `user_job` rows | with the account; rows whose job is gone are deleted unless applied | decisions and the Applied history |
+| Tailored resume drafts | 90 days after the last change | come back to a draft |
+| Frozen resumes and their PDFs | until deleted by the person, or with the account | proof of what was sent |
+| Downloads not chosen at Mark applied | deleted at freezing, or when the draft expires | only the sent file matters |
+| `verdict_report` | 90 days | find a wrong verdict's cause by experiment |
+| `ai_call` | 90 days | budget, cost per task and refusal rates |
+| `ai_pause` | the latest row | the current pause state |
+| `audit_event` | 12 months | who changed an account, and when |
+| pg-boss jobs | finished 7 days, failed 30 days | debugging the queue |
+| App logs | Docker's `local` log driver, capped at 20 MB × 5 files per container, and gone when a container is recreated | debugging; ids and counts only |
+| The deletion journal (a file on the server) | 60 days | re-apply deletions after a restore from backup |
+| Database backups | the host's window, 7 days to start | restore after a mistake or failure |
+| Supabase auth logs; Anthropic's inputs and outputs | the processors' own windows (Anthropic: 30 days by default) | outside our control; listed so nothing is forgotten |
+
 ### Deleting an account: the inventory
 
 | Store | At deletion |
@@ -229,7 +257,7 @@ pg-boss keeps its own tables. Payloads carry ids only, never email addresses or 
 | `ai_call` | `user_id` set to null; costs stay for the budget |
 | `audit_event` | User link removed; one "account deleted" event with no email |
 | pg-boss jobs | The person's queued jobs are cancelled in the transaction; handlers check the person still exists before any AI call |
-| App logs (host, 30 days) | Ids only. One line records the deletion (user id, time), so a restore can re-apply it |
+| App logs | Ids only, capped and short-lived. The deletion journal on the server records the deletion (user id, time) for 60 days, so a restore can re-apply it |
 | Database backups | Expire with the host's restore window (about 7 days); the restore runbook re-applies deletions logged since the restore point |
 | Supabase | The owner deletes the user in its dashboard; its auth logs expire on its schedule |
 | Anthropic | Its retention applies: 30 days by default, longer for flagged content |
@@ -403,7 +431,7 @@ The owner adds a requested board with `sources add <link>`. Only the five hosted
 - **AI lanes:** the in-flight limit from the limits table, with one slot reserved for the interactive lane. Scheduled screening runs round-robin across people, in chunks of 10.
 - **Job state:**
   - one source of truth per job: the subject's row;
-  - handlers run in a transaction with the job's completion;
+  - slow work (AI calls, fetches, parsing) happens outside any transaction; then one short transaction writes the result through `store` and completes the job (`complete(…, { db: fromDrizzle(tx, sql) })`), so a rollback leaves neither;
   - each queue's dead-letter handler marks the row failed with an error code;
   - handlers are idempotent and reuse a stored AI reply on retry;
   - a handler that meets a pause sets its subject to `paused` and completes its pg-boss job, so nothing retries or fails;
@@ -444,7 +472,7 @@ Never keys, session data, eligibility settings or other people's data. Postings 
 
 | Area | Routes (all under `/api`) |
 |---|---|
-| Me | `GET me` (links the account on the first sign-in), `POST me/onboarding/finish`. Sign-in and sign-out happen between the browser and Supabase |
+| Me | `GET me` (the signed-in person's account; accounts are added with `users add`), `POST me/onboarding/finish`. Sign-in and sign-out happen between the browser and Supabase |
 | Settings | `GET settings`, `PUT settings` |
 | Master resume | `GET master-resume`, `PUT master-resume`, `PUT master-resume/contact`, `GET master-resume/ai-view`, `POST master-resume/restore-snapshot` |
 | Imports | `POST resume-imports`, `GET resume-imports/{id}`, `POST resume-imports/{id}/accept`, `DELETE resume-imports/{id}` |
@@ -527,14 +555,14 @@ Tests reach only localhost. The quality bar is in [`../CONSTRAINTS.md`](../CONST
 
 | | Local | CI | Production |
 |---|---|---|---|
-| Database | Homebrew `postgresql@18`, no Docker | `postgres:18` service | managed Postgres 18 (or 17), private, admitting only the backend, on the host or in the Supabase project (phase 2). Disposable before the alpha; daily backups and point-in-time restore from the alpha on |
+| Database | Homebrew `postgresql@18`, no Docker | `postgres:18` service | DigitalOcean Managed PostgreSQL in Toronto (18 if offered, else 17), admitting only the app's server ([ADR-011](decisions/ADR-011-host.md)). Disposable before the alpha; daily backups and 7-day point-in-time restore included |
 | Sign-in | the fake Supabase for agents and tests; the owner uses the development Supabase project | the fake Supabase | the production Supabase project (Canada Central); built-in email, which reaches only the owner |
 | AI | dev workspace key, or fake mode | fake mode and recorded replies | production workspace key with a spend limit |
-| Processes | `pnpm dev` runs web, backend and document service | built, tested, image smoke-tested | web (public), backend and document service (private), on one host |
+| Processes | `pnpm dev` runs web, backend and document service | built, tested, image smoke-tested | one DigitalOcean server in Toronto running Caddy, web, backend and the document service under Docker Compose ([ADR-011](decisions/ADR-011-host.md)) |
 
 The walking skeleton deploys to production in phase 3 without data. The alpha is the first production deploy with data: the owner's own search, on the production database, Supabase project and AI workspace, which no agent ever reads ([`AGENTS.md`](../AGENTS.md)).
 
-**Choosing the vendor** (phase 2), for hosting model (a). The criteria:
+**The vendor,** proposed in [ADR-011](decisions/ADR-011-host.md): one DigitalOcean server in Toronto running Docker Compose and Caddy, with the document service on a network that has no route out, plus DigitalOcean Managed PostgreSQL in Toronto, which admits only that server. It was chosen against these criteria:
 - a Canadian region;
 - private networking between the web app, the backend and the document service;
 - a database firewall that admits only the backend, with point-in-time restore (the Supabase database is compared on the same terms);
@@ -544,7 +572,7 @@ The walking skeleton deploys to production in phase 3 without data. The alpha is
 - deploys and rollback from CI with protected credentials;
 - cost.
 
-Candidates, from the [delivery note](research/delivery.md): DigitalOcean Toronto (App Platform and Managed PostgreSQL), Fly.io in Toronto, or one VPS in Canada with Docker Compose and Caddy. A VPS fails the browser-console criterion unless owner commands run from a separate macOS user.
+The comparison is in the [hosting note](research/hosting.md).
 
 ## Later, and what triggers it
 

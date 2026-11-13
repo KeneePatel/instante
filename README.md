@@ -2,7 +2,7 @@
 
 A personal web app for a job search. Instante keeps a pool of full job postings from companies' own job boards and screens them against the master resume, showing the evidence and computing the verdict in code. For a chosen job, it writes a one-page resume using only facts the person already has.
 
-**Status:** phase 1 of 5, *Discover and decide*. The work finished 2026-11-12, including three adversarial review cycles over every decision. The owner answered the gate questions and signed the phase off on 2026-11-13, and every ADR is accepted. Phase 2, *Foundations*, is next. There's no code yet. The lifecycle is in [`docs/sdlc.md`](docs/sdlc.md).
+**Status:** phase 1 of 5, *Discover and decide*. The work finished 2026-11-12, including three adversarial review cycles over every decision. The owner answered the gate questions and signed the phase off on 2026-11-13, and every ADR is accepted. Phase 2, *Foundations*, started the same day: its drafts (the host, the threat model, retention, the `platform` and `accounts` specs) wait for the owner. There's no code yet. The lifecycle is in [`docs/sdlc.md`](docs/sdlc.md).
 
 ## Read in this order
 

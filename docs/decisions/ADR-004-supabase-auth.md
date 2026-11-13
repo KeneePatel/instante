@@ -81,7 +81,10 @@ Accepted 2026-11-13. At the phase 1 gate the owner chose Supabase Auth over the 
   A password, or an email code alone, never gets past the backend, because the backend requires `aal2`.
 - **Keeping the session fresh:**
   - `proxy.ts` makes Supabase's server client and calls `getClaims()` on each navigation;
-  - its matcher covers every page except `/sign-in`, static assets and `/api`;
+  - its matcher covers every page, sign-in included (for the CSP), and leaves out `/api`, static assets and prefetches; the sign-in pages skip the redirects below;
+  - it refreshes the session when the access token has under 5 minutes left, so a render never meets supabase-js's own 90-second refresh margin;
+  - if the key set can't be fetched (Supabase down or paused), it lets the request through, since the backend verifies with its own key cache;
+  - it accepts a `next` path only if it starts with a single `/` and names a known route;
   - without claims, or below `aal2`, it redirects to the matching step of `/sign-in`;
   - it's the only server code that writes Supabase's cookies, and Server Components only read the token.
 - **Calling the backend:** every request carries `Authorization: Bearer <access token>`.
@@ -149,7 +152,7 @@ Accepted 2026-11-13. At the phase 1 gate the owner chose Supabase Auth over the 
 ## Consequences
 - **Much less security code of our own:** no codes, HMACs, email sending, per-address limits, sessions table or invite list. The `accounts` module is token verification, the key cache, account rows, the sign-in page and owner commands.
 - **Two factors on every sign-in.** The authenticator code arrives once per new session, and sessions last until sign-out. Guessing email codes, or a password from the dashboard, gets an attacker only `aal1`, which the backend refuses.
-- **No domain or email provider is needed** while only the owner signs in. Inviting anyone else needs custom SMTP, and with it a domain.
+- **No email provider is needed** while only the owner signs in. A domain is still recommended before the first real sign-in on production, because a shared hostname's operators could take over the address ([ADR-011](ADR-011-host.md), decision D8). Inviting anyone else also needs custom SMTP on that domain.
 - **Scripts can read the session cookie,** and its refresh token never expires. An XSS bug would hand an attacker the session, which then holds `aal2`.
   - The defences: no raw HTML (a floor rule), React's escaping, Markdown without raw HTML, no third-party scripts, and a nonce-based CSP once Cache Components is off, which phase 2 recommends ([ADR-005](ADR-005-same-origin-rewrite-and-typed-contract.md)).
   - Accepted for one person; revisited before anyone else uses Instante.

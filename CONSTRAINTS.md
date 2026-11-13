@@ -23,12 +23,12 @@ A floor guard, adapted from the constraint-driven-development skill's reference 
 
 | Dimension | Rule | Checked by | Runs at |
 |---|---|---|---|
-| Lint and format (fast) | Zero errors and diffs on changed files | ESLint and Prettier on the changed files | every edit (`check:fast`, under 5 s) |
+| Lint and format (fast) | Zero errors and diffs on changed files | untyped ESLint and Prettier on the changed files | every edit (`check:fast`, under 5 s) |
 | Secrets | No findings, values never printed | `gitleaks git --redact` | every edit, CI |
-| Types | Zero type errors across the workspace | `tsc --noEmit` (incremental) | task end (`check:task`), CI |
+| Types | Zero type errors across the workspace | each package's `typecheck` (`tsc --noEmit -p .`) | task end (`check:task`), CI |
 | Lint (typed) | Zero errors from typescript-eslint `strictTypeChecked`, including `no-floating-promises` and the module-direction rules | ESLint | task end, CI |
 | Tests | All pass, reaching only localhost | Vitest (unit, and integration on real Postgres 18) | task end, CI |
-| Coverage | Changed lines ≥ 80% covered | `@vitest/coverage-v8` LCov + `diff-cover --fail-under=80` | task end, CI |
+| Coverage | Changed lines ≥ 80% covered in `apps/backend/src`, `packages/contract/src` and `apps/web/lib`; pages and components are covered by the end-to-end and axe rows instead. This scope is fixed now and changing it counts as weakening | `@vitest/coverage-v8` LCov + `diff-cover --fail-under=80` | task end, CI |
 | Contract | Every route's reply parses against its response schema; the web app type-checks against the table; from the release phase, `contract.json` is current | route tests, `tsc`, snapshot diff | CI |
 | Isolation | Generated from the contract's route table, failing on any route without an entry or a `public` marker. B gets 404 on A's path ids; B's requests with A's ids in the body are refused with no side effect; A's private rows never appear in B's lists or search; B's queue jobs against A's objects do nothing | isolation matrix (cases the owner specifies) | CI |
 | Unauthenticated access | Every non-public route returns 401, including encoded-path and trailing-slash variants, and a request with a valid Supabase cookie but no bearer header | unauthenticated matrix from the route table | CI |
