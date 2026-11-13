@@ -101,7 +101,7 @@ export function registerRoutes<T extends RouteTable>(
     if (spec.auth === 'user') steps.push(requireUser(options.authenticate));
     if (spec.body !== undefined) {
       steps.push(limitBody(spec.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES));
-      if (!isRaw(spec.body)) steps.push(requireJson);
+      if (isSchema(spec.body)) steps.push(requireJson);
     }
     app.on(spec.method, [spec.path], ...steps, async (c) => {
       const input = {
@@ -159,13 +159,13 @@ const requireJson: MiddlewareHandler<AppEnv> = async (c, next) => {
 };
 
 /** A Zod schema parses; the contract's raw-body and file markers don't. */
-function isRaw(body: z.ZodType | RawBody): body is RawBody {
-  return !('safeParse' in body);
+function isSchema(value: z.ZodType | RawBody | FileResponse): value is z.ZodType {
+  return 'safeParse' in value;
 }
 
 async function readBody(c: Context<AppEnv>, body: z.ZodType | RawBody | undefined) {
   if (body === undefined) return undefined;
-  if (isRaw(body)) return new Uint8Array(await c.req.arrayBuffer());
+  if (!isSchema(body)) return new Uint8Array(await c.req.arrayBuffer());
   const text = await c.req.text();
   let value: unknown;
   try {
@@ -192,7 +192,7 @@ function validate(schema: z.ZodType | undefined, value: unknown): unknown {
 
 function reply(c: Context<AppEnv>, spec: RouteSpec, result: unknown): Response {
   const { response } = spec;
-  if (!('safeParse' in response)) {
+  if (!isSchema(response)) {
     if (!(result instanceof Uint8Array)) throw new Error(`${spec.path} must reply with bytes`);
     // A copy, so the reply owns a plain ArrayBuffer whatever the handler's bytes sit on.
     return c.body(new Uint8Array(result), 200, { 'Content-Type': response.contentType });

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
-import { createServer, type AddressInfo } from 'node:net';
+import { connect, createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -116,6 +116,169 @@ describe('start', () => {
     );
   });
 
+  const runtime = {
+    nodeVersion: PINNED_NODE,
+    execArgv: [],
+    homeDir: '/Users/nobody',
+    readFile: () => 'postgresql://x@localhost/y',
+  };
+  const quiet: Sink = { out: () => {}, err: () => {} };
+  const acceptGood = (authorization: string | undefined) =>
+    Promise.resolve(authorization === 'Bearer good' ? { userId: 'u1' } : null);
+
+  async function running(
+    env: Record<string, string> = {},
+    options: { sink?: Sink } = {},
+  ): Promise<Running & { own: Record<string, string> }> {
+    const port = await freePort();
+    const started = await start({
+      env: { ...envFor(port), ...env },
+      runtime,
+      sink: options.sink ?? quiet,
+      authenticate: acceptGood,
+    });
+    return { ...started, own: { host: `127.0.0.1:${String(port)}`, authorization: 'Bearer good' } };
+  }
+
+  it.each([
+    ['test', 200],
+    ['development', 404],
+  ] as const)(
+    'with INSTANTE_ENV=%s, answers the test routes with %i',
+    async (instanteEnv, status) => {
+      const server = await running({ INSTANTE_ENV: instanteEnv });
+      try {
+        expect((await get(server.port, '/api/test/file.pdf', server.own)).status).toBe(status);
+        expect((await get(server.port, '/api/ping', server.own)).status).toBe(200);
+      } finally {
+        await server.close();
+      }
+    },
+  );
+
+  it('takes a request forwarded from ALLOWED_HOST, and no other', async () => {
+    const server = await running();
+    try {
+      const from = (host: string) =>
+        get(server.port, '/api/ping', { ...server.own, 'x-forwarded-host': host });
+      expect((await from('localhost:4320')).status).toBe(200);
+      expect((await from('localhost:3000')).status).toBe(421);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('really waits in slow, sending nothing first', async () => {
+    const server = await running();
+    try {
+      const began = Date.now();
+      const response = await get(server.port, '/api/test/slow?seconds=1', server.own);
+      expect(response.status).toBe(200);
+      expect(Date.now() - began).toBeGreaterThanOrEqual(950);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('refuses a port already in use', async () => {
+    const blocker = createServer();
+    await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
+    const { port } = blocker.address() as AddressInfo;
+    try {
+      await expect(start({ env: envFor(port), runtime, sink: quiet })).rejects.toThrow(
+        /EADDRINUSE/,
+      );
+    } finally {
+      blocker.close();
+    }
+  });
+
+  it('logs an upload its client abandons as aborted, not as a failure', async () => {
+    const lines: Record<string, unknown>[] = [];
+    const sink: Sink = {
+      out: (l) => lines.push(JSON.parse(l) as Record<string, unknown>),
+      err: (l) => lines.push(JSON.parse(l) as Record<string, unknown>),
+    };
+    const server = await running({}, { sink });
+    try {
+      const socket = connect(server.port, '127.0.0.1');
+      await new Promise<void>((resolve) => socket.once('connect', resolve));
+      socket.write(
+        `POST /api/test/echo HTTP/1.1\r\nHost: ${server.own['host'] ?? ''}\r\nContent-Length: 1000\r\n\r\n0123456789`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      socket.destroy();
+      for (let i = 0; i < 40 && !lines.some((l) => l['event'] === 'request'); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(lines).toContainEqual(
+        expect.objectContaining({ level: 'info', event: 'request.aborted' }),
+      );
+      expect(lines.some((l) => l['event'] === 'request.failed')).toBe(false);
+      expect(lines).toContainEqual(expect.objectContaining({ event: 'request', status: 422 }));
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('stops within its grace period, even with a half-sent request open', async () => {
+    const server = await running();
+    const socket = connect(server.port, '127.0.0.1');
+    socket.on('error', () => {});
+    await new Promise<void>((resolve) => socket.once('connect', resolve));
+    socket.write(`GET /api/ping HTTP/1.1\r\nHost: ${server.own['host'] ?? ''}\r\n`);
+    const began = Date.now();
+    await server.close(300);
+    expect(Date.now() - began).toBeLessThan(2000);
+    socket.destroy();
+  });
+
+  it('cuts a request still running when the grace period ends', async () => {
+    const server = await running();
+    const reply = get(server.port, '/api/test/slow?seconds=5', server.own).catch(
+      (error: unknown) => error,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const began = Date.now();
+    await server.close(300);
+    expect(Date.now() - began).toBeLessThan(2000);
+    expect(await reply).toBeInstanceOf(Error);
+  });
+
+  it('tells a request that finishes arriving after the stop began to close its connection', async () => {
+    const server = await running();
+    const socket = connect(server.port, '127.0.0.1');
+    await new Promise<void>((resolve) => socket.once('connect', resolve));
+    let head = '';
+    socket.on('data', (chunk: Buffer) => {
+      head += chunk.toString();
+    });
+    const ended = new Promise<void>((resolve) => {
+      socket.once('close', () => {
+        resolve();
+      });
+    });
+    socket.write(`GET /api/ping HTTP/1.1\r\nHost: ${server.own['host'] ?? ''}\r\n`);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const closed = server.close(5000);
+    socket.write('\r\n');
+    await ended;
+    await closed;
+    expect(head).toMatch(/^HTTP\/1\.1 200/);
+    expect(head).toMatch(/\r\nconnection: close\r\n/i);
+  });
+
+  it('tells a request still in flight to close its connection once stopping', async () => {
+    const server = await running();
+    const reply = get(server.port, '/api/test/slow?seconds=1', server.own);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const closed = server.close();
+    const response = await reply;
+    expect(response.status).toBe(200);
+    expect(response.headers['connection']).toBe('close');
+    await closed;
+  });
+
   it('refuses a role this release has nothing to run for', async () => {
     const env = { INSTANTE_ENV: 'test', ROLE: 'documents', DOCUMENTS_SOCKET: '/tmp/d.sock' };
     await expect(start({ env })).rejects.toThrow(/ROLE=documents has nothing to run/);
@@ -153,6 +316,30 @@ describe('main.ts', () => {
     expect(ping.status).toBe(200);
     child.kill('SIGTERM');
     expect(await exited).toBe(0);
+  }, 15_000);
+
+  it('stops on SIGINT too', async () => {
+    const port = await freePort();
+    const { child, exited, output } = run(envFor(port));
+    for (let i = 0; i < 100 && !output().out.includes('start.listening'); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    child.kill('SIGINT');
+    expect(await exited).toBe(0);
+  }, 15_000);
+
+  it('exits 1 when it cannot start for another reason, logging why', async () => {
+    const blocker = createServer();
+    await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
+    const { port } = blocker.address() as AddressInfo;
+    try {
+      const { exited, output } = run(envFor(port));
+      expect(await exited).toBe(1);
+      expect(output().err).toMatch(/"event":"start.failed"/);
+      expect(output().err).toMatch(/EADDRINUSE/);
+    } finally {
+      blocker.close();
+    }
   }, 15_000);
 
   it('refuses a bad configuration with exit code 78, naming the problem and no secret', async () => {

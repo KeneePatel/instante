@@ -21,7 +21,11 @@ export type TestApp = {
 };
 
 export function testApp(
-  options: { testRoutes?: boolean; authenticate?: Authenticate } = {},
+  options: {
+    testRoutes?: boolean;
+    authenticate?: Authenticate;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
 ): TestApp {
   const lines: Record<string, unknown>[] = [];
   const slept: number[] = [];
@@ -41,7 +45,7 @@ export function testApp(
       logger: createLogger({ clock, sink }),
       sleep: (ms) => {
         slept.push(ms);
-        return Promise.resolve();
+        return options.sleep === undefined ? Promise.resolve() : options.sleep(ms);
       },
     },
   });

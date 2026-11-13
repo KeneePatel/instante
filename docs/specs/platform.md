@@ -143,15 +143,21 @@ That keeps "patched the day it lands" possible without loosening the setting.
   - **the clock and ids;**
   - **the document-service client,** over `node:http` to `DOCUMENTS_SOCKET`, with a total 25-second deadline, under the rewrite's 30.
 - **`api`:**
-  - a Hono app built from the contract by `registerRoutes(table, handlers, authenticate)`. A route without an `auth` value, or without a handler, fails to register;
+  - a Hono app built from the contract by `registerRoutes(app, table, handlers, { authenticate, deps })`. A route without an `auth` value or a handler, or a handler without a route, fails to register, and then nothing in that table registers;
   - **before any route,** in this order:
-    1. `Host` must be the backend's own `127.0.0.1:<port>`, and `X-Forwarded-Host`, when present, must equal `ALLOWED_HOST`; otherwise `421`;
-    2. a `Sec-Fetch-Site` of `cross-site` or `same-site` gets `403`; requests without the header (Server Components, tools) pass;
-    3. `Cookie` is dropped;
-    4. body limits per route, checked on `Content-Length` before reading, since the rewrite cuts bodies over 10 MB without an error;
-    5. our own JSON media-type check;
-    6. a request id;
-  - after every route, the reply is parsed through its response schema (unknown fields dropped), and `Cache-Control: private, no-store` and `Vary: Authorization` are added;
+    1. a request id, so each refusal below is logged with one;
+    2. `Host` must be the backend's own `127.0.0.1:<port>`, and `X-Forwarded-Host`, when present, must equal `ALLOWED_HOST`; otherwise `421`;
+    3. a `Sec-Fetch-Site` of `cross-site` or `same-site` gets `403`; requests without the header (Server Components, tools) pass;
+    4. `Cookie` is dropped;
+  - **per route,** in this order:
+    1. sign-in for `user` routes (`401`), before any of the body is read;
+    2. the body limit, checked on `Content-Length` before reading and counted as a chunked body streams in, since the rewrite cuts bodies over 10 MB without an error (`413`; 1 MiB unless the route names its own);
+    3. our own JSON media-type check: `application/json`, in UTF-8 if a charset is named (`415`);
+    4. params, query and body validated (`422`);
+  - a path no route matches, in any spelling, answers `401` unless the caller is signed in (then `404`), so no spelling of a `user` route's path gets past sign-in;
+  - after every route, the reply is parsed through its response schema (unknown fields dropped), and `Cache-Control: private, no-store`, `Vary: Authorization` and `X-Content-Type-Options: nosniff` are added to every reply, errors included;
+  - a caller that leaves mid-request is logged as `request.aborted`, not as a failure;
+  - **on stop** (`SIGTERM` or `SIGINT`): no new connections, every reply still to be sent carries `Connection: close`, and whatever is left is closed after 10 seconds, under the rewrite's 30;
   - `authenticate` is injected. Until `accounts` supplies the real one, it refuses every token;
   - `GET /healthz` (the process is up) and `GET /readyz` (the database answers, migrations and pg-boss's schema are current, the document service answers), both outside `/api`.
 - **`store`:**

@@ -15,8 +15,13 @@ function concrete(path: string): string {
   return path.replace(/:[A-Za-z]+/g, 'x');
 }
 
+/** Percent-encodes the last segment's first character whose code has a hex letter (such as
+ * '-', 'n' or 'o'), so the lower- and upper-case spellings really differ. */
 function encodeOneLetter(path: string, upper: boolean): string {
-  const i = path.lastIndexOf('/') + 1;
+  const start = path.lastIndexOf('/') + 1;
+  let i = start;
+  while (i < path.length && !/[a-f]/.test(path.charCodeAt(i).toString(16))) i++;
+  if (i === path.length) i = start;
   const hex = path.charCodeAt(i).toString(16);
   return `${path.slice(0, i)}%${upper ? hex.toUpperCase() : hex}${path.slice(i + 1)}`;
 }
@@ -49,6 +54,11 @@ describe('the unauthenticated matrix', () => {
 
   describe.each(userRoutes)('%s', (_name, spec) => {
     const path = concrete(spec.path);
+
+    it('is spelled ten different ways', () => {
+      expect(new Set(spellings(path).map(([, target]) => target)).size).toBe(10);
+    });
+
     it.each(spellings(path))('answers 401 to its path %s', async (_spelling, target) => {
       const { call } = testApp();
       for (const [, headers] of tokens) {

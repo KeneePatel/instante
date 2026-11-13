@@ -31,7 +31,7 @@ export const testRouteHandlers: Handlers<typeof testRoutes> = {
 export const FIXTURE_PDF: Uint8Array = buildPdf([
   '<< /Type /Catalog /Pages 2 0 R >>',
   '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-  '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>',
+  '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> >>',
 ]);
 
 function buildPdf(objects: string[]): Uint8Array {

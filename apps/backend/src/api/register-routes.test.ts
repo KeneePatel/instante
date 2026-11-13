@@ -92,6 +92,31 @@ const table = {
     response: fileResponse('application/pdf'),
     errors: [],
   }),
+  mineSave: defineRoute({
+    method: 'POST',
+    path: '/api/mine/save',
+    auth: 'user',
+    body: z.object({ title: z.string() }),
+    maxBodyBytes: 64,
+    response: ok,
+    errors: ['unauthenticated'],
+  }),
+  mineUpload: defineRoute({
+    method: 'POST',
+    path: '/api/mine/upload',
+    auth: 'user',
+    body: rawBody,
+    maxBodyBytes: 16,
+    response: ok,
+    errors: ['unauthenticated'],
+  }),
+  notBytes: defineRoute({
+    method: 'GET',
+    path: '/api/not-bytes',
+    auth: 'public',
+    response: fileResponse('application/pdf'),
+    errors: [],
+  }),
   leaky: defineRoute({
     method: 'GET',
     path: '/api/leaky',
@@ -121,6 +146,12 @@ const handlers: Handlers<typeof table> = {
   file: () => new TextEncoder().encode('%PDF-1.7'),
   leaky: () => ({ id: 'x', email: 'jordan@example.com' }) as { id: string },
   broken: () => ({ id: 42 }) as unknown as { id: string },
+  mineSave: ({ user }) => {
+    expect(user).toEqual({ userId: 'u1' });
+    return { ok: true };
+  },
+  mineUpload: () => ({ ok: true }),
+  notBytes: () => 'not bytes' as unknown as Uint8Array<ArrayBuffer>,
 };
 
 const app = appWith(table, handlers);
@@ -186,6 +217,34 @@ describe('registerRoutes', () => {
     expect(signedIn.status).toBe(200);
   });
 
+  it('asks for the token before it reads, sizes or types a body', async () => {
+    const tooBig = 'x'.repeat(100);
+    const cases: [string, RequestInit][] = [
+      ['/api/mine/save', json({ title: tooBig })],
+      ['/api/mine/save', json({ title: 'a' }, 'text/plain')],
+      ['/api/mine/upload', { method: 'POST', body: new Uint8Array(100) }],
+    ];
+    for (const [path, init] of cases) {
+      expect(await codeOf(await call(path, init))).toBe('unauthenticated');
+      const headers = {
+        ...(init.headers as Record<string, string> | undefined),
+        authorization: 'Bearer good',
+      };
+      const signedIn = await call(path, { ...init, headers });
+      expect([413, 415]).toContain(signedIn.status);
+    }
+    const good = await call('/api/mine/save', {
+      ...json({ title: 'a' }),
+      headers: { 'content-type': 'application/json', authorization: 'Bearer good' },
+    });
+    expect(good.status).toBe(200);
+  });
+
+  it('registers each route for its own method only', async () => {
+    expect((await call('/api/save')).status).toBe(404);
+    expect((await call('/api/open', { method: 'POST' })).status).toBe(404);
+  });
+
   it('validates params and query, and hands the handler the parsed values', async () => {
     const good = await call('/api/items/j_8k2m4q7r?n=3');
     expect(await good.json()).toEqual({ id: 'j_8k2m4q7r', n: 3 });
@@ -222,9 +281,30 @@ describe('registerRoutes', () => {
     it.each([
       'text/plain',
       'application/x-www-form-urlencoded',
+      'application/jsonp',
       'application/json; charset=latin1',
+      'application/json; CHARSET=latin1',
+      'application/json; foo=bar; charset=latin1',
     ])('need application/json, so %s gets 415', async (type) => {
       expect((await call('/api/save', json({ title: 'a' }, type))).status).toBe(415);
+    });
+
+    it('need a Content-Type at all', async () => {
+      // Bytes, since a string body would be given text/plain on its own.
+      const body = new TextEncoder().encode('{"title":"a"}');
+      const response = await call('/api/save', { method: 'POST', body });
+      expect(response.headers.get('content-type')).not.toBeNull();
+      expect(response.status).toBe(415);
+    });
+
+    it('check the size before the type', async () => {
+      const response = await call('/api/save', json({ title: 'x'.repeat(100) }, 'text/plain'));
+      expect(response.status).toBe(413);
+    });
+
+    it('take a media type with spaces around its parts', async () => {
+      const type = ' application/json ; charset=utf-8';
+      expect((await call('/api/save', json({ title: 'a' }, type))).status).toBe(200);
     });
 
     it('take application/json with a UTF-8 charset, in any case', async () => {
@@ -278,6 +358,10 @@ describe('registerRoutes', () => {
     const response = await call('/api/file');
     expect(response.headers.get('content-type')).toBe('application/pdf');
     expect(new TextDecoder().decode(await response.arrayBuffer())).toBe('%PDF-1.7');
+  });
+
+  it('refuses a file reply that is not bytes', async () => {
+    expect((await call('/api/not-bytes')).status).toBe(500);
   });
 
   it('drops the fields a reply schema leaves out', async () => {

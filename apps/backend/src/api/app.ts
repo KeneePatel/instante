@@ -1,5 +1,5 @@
 import { routes, testRoutes } from '@instante/contract';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { AppError, errorReply } from '../kit/errors.ts';
 import { routeHandlers } from './handlers/ping.ts';
@@ -29,24 +29,33 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
 
   app.get('/healthz', (c) => c.json({ ok: true }));
   registerRoutes(app, routes, routeHandlers, { authenticate, deps });
-  if (options.testRoutes)
+  if (options.testRoutes) {
     registerRoutes(app, testRoutes, testRouteHandlers, { authenticate, deps });
+  }
 
   // A path no route matches, in any spelling (a trailing slash, a changed case, a suffix),
   // asks for sign-in first: only a signed-in caller learns that it doesn't exist.
   app.notFound(async (c) => {
     const user = await authenticate(c.req.header('authorization'));
-    const { status, body } = errorReply(
-      new AppError(user === null ? 'unauthenticated' : 'not_found'),
-    );
-    return c.json(body, status as ContentfulStatusCode);
+    return send(c, new AppError(user === null ? 'unauthenticated' : 'not_found'));
   });
+
   app.onError((error, c) => {
-    const { status, body } = errorReply(error);
-    // Logged with the request id when requestContext set one; the sanitizer drops it if not.
-    if (status >= 500)
-      deps.logger.error('request.failed', { requestId: c.get('requestId'), error });
-    return c.json(body, status as ContentfulStatusCode);
+    // With the request id when requestContext set one; the sanitizer drops it if not.
+    const requestId = c.get('requestId');
+    if (c.req.raw.signal.aborted) {
+      // The caller left mid-request, say mid-upload: nobody gets this reply, and it's no fault.
+      deps.logger.info('request.aborted', { requestId });
+      return send(c, new AppError('validation_failed', { message: 'The request ended early.' }));
+    }
+    const reply = send(c, error);
+    if (reply.status >= 500) deps.logger.error('request.failed', { requestId, error });
+    return reply;
   });
   return app;
+}
+
+function send(c: Context<AppEnv>, error: unknown): Response {
+  const { status, body } = errorReply(error);
+  return c.json(body, status as ContentfulStatusCode);
 }

@@ -15,6 +15,8 @@ describe('the backend', () => {
       ['another host', { host: 'evil.test' }],
       ['the web app’s host, sent directly', { host: ALLOWED_HOST }],
       ['localhost instead of 127.0.0.1', { host: 'localhost:4321' }],
+      ['its own address with a longer port', { host: '127.0.0.1:43210' }],
+      ['an empty forwarded host', { 'x-forwarded-host': '' }],
       ['another port', { host: '127.0.0.1:4311' }],
       ['a forwarded host that is not the web app’s', { 'x-forwarded-host': 'evil.test' }],
       ['two forwarded hosts', { 'x-forwarded-host': `${ALLOWED_HOST}, evil.test` }],
@@ -30,6 +32,12 @@ describe('the backend', () => {
       const { call } = testApp();
       const response = await call('/api/ping', { headers: { 'x-forwarded-host': ALLOWED_HOST } });
       expect(response.status).toBe(200);
+    });
+
+    it('and refuses a request with no Host at all', async () => {
+      const { app } = testApp();
+      const response = await app.request(`http://${OWN_HOST}/api/ping`);
+      expect(response.status).toBe(421);
     });
 
     it('checks the Host header, never the address in the request line', async () => {
@@ -68,6 +76,41 @@ describe('the backend', () => {
         headers: { host: 'evil.test', 'sec-fetch-site': 'cross-site' },
       });
       expect(response.status).toBe(421);
+    });
+  });
+
+  it('removes Cookie before any route can read it', async () => {
+    const { app, call } = testApp();
+    app.get('/api/probe-cookie', (c) =>
+      c.json({ header: c.req.header('cookie') ?? null, raw: c.req.raw.headers.has('cookie') }),
+    );
+    const response = await call('/api/probe-cookie', {
+      headers: { cookie: 'sb-abcd-auth-token=v' },
+    });
+    expect(await response.json()).toEqual({ header: null, raw: false });
+  });
+
+  it('hands each route the request’s own logger, carrying its id', async () => {
+    const { app, call, lines } = testApp();
+    app.get('/api/probe-log', (c) => {
+      c.get('logger').info('probe');
+      return c.json({});
+    });
+    const response = await call('/api/probe-log');
+    expect(lines).toContainEqual(
+      expect.objectContaining({ event: 'probe', requestId: response.headers.get('x-request-id') }),
+    );
+  });
+
+  it('reports an empty Authorization to echo as present, with its hash', async () => {
+    const { call } = testApp();
+    const response = await call('/api/test/echo', {
+      method: 'POST',
+      headers: { authorization: '' },
+      body: '',
+    });
+    expect(await response.json()).toMatchObject({
+      authorizationSha256: createHash('sha256').update('').digest('hex'),
     });
   });
 
@@ -148,6 +191,20 @@ describe('the backend', () => {
   });
 
   describe('the test routes', () => {
+    it('a path no route matches asks for sign-in, and only a signed-in caller gets 404', async () => {
+      const { call } = testApp({
+        authenticate: (authorization) =>
+          Promise.resolve(authorization === 'Bearer good' ? { userId: 'u1' } : null),
+      });
+      expect((await call('/api/nowhere')).status).toBe(401);
+      expect(
+        (await call('/api/nowhere', { headers: { authorization: 'Bearer bad' } })).status,
+      ).toBe(401);
+      expect(
+        (await call('/api/nowhere', { headers: { authorization: 'Bearer good' } })).status,
+      ).toBe(404);
+    });
+
     it('are not registered unless asked for, as in production', async () => {
       const signedIn = testApp({
         testRoutes: false,
@@ -158,6 +215,25 @@ describe('the backend', () => {
         expect(response.status).toBe(404);
       }
       expect((await signedIn.call('/api/ping')).status).toBe(200);
+    });
+
+    it('slow sends its reply only once its wait is over', async () => {
+      let release = (): void => {};
+      const { call } = testApp({
+        sleep: () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      });
+      let settled = false;
+      const pending = call('/api/test/slow?seconds=5').then((response) => {
+        settled = true;
+        return response;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(settled).toBe(false);
+      release();
+      expect((await pending).status).toBe(200);
     });
 
     it('slow waits as long as asked before it sends anything', async () => {
@@ -182,6 +258,12 @@ describe('the backend', () => {
       });
       const startxref = Number(/startxref\n(\d+)\n/.exec(text)?.[1]);
       expect(text.slice(startxref).startsWith('xref\n')).toBe(true);
+      // The trailer's root is the catalog, whose pages hold the one page.
+      const object = (n: number) => text.slice(offsets[n - 1]).split('endobj')[0] ?? '';
+      expect(text).toMatch(/trailer\n<< \/Size 4 \/Root 1 0 R >>/);
+      expect(object(1)).toMatch(/\/Type \/Catalog \/Pages 2 0 R/);
+      expect(object(2)).toMatch(/\/Type \/Pages \/Kids \[3 0 R\] \/Count 1/);
+      expect(object(3)).toMatch(/\/Type \/Page \/Parent 2 0 R .*\/Resources/);
     });
   });
 
@@ -203,6 +285,7 @@ describe('the backend', () => {
     expect(lines).toContainEqual(
       expect.objectContaining({
         event: 'request.failed',
+        requestId: response.headers.get('x-request-id'),
         error: { name: 'DatabaseError', code: '23505' },
       }),
     );

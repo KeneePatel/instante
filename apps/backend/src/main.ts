@@ -1,5 +1,6 @@
+import { systemClock } from './kit/clock.ts';
 import { ConfigError } from './kit/config.ts';
-import { sanitize } from './kit/sanitize.ts';
+import { createLogger } from './kit/logger.ts';
 import { start } from './start.ts';
 
 // The backend's entry point: `node --disable-sigusr1 apps/backend/src/main.ts`, with ROLE and
@@ -18,9 +19,7 @@ try {
     console.error(error.message);
     process.exitCode = 78;
   } else {
-    console.error(
-      JSON.stringify({ level: 'error', event: 'start.failed', error: sanitize(error) }),
-    );
+    createLogger({ clock: systemClock }).error('start.failed', { error });
     process.exitCode = 1;
   }
 }
