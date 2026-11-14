@@ -643,8 +643,8 @@ describe('cli db', () => {
               ROLE: 'cli',
               OWNER_DATABASE_URL_FILE: file,
             },
-            // Killed before the test's own timeout, so none outlives a failed run holding a
-            // connection, which would stop the next run's setup reclaiming that run's databases.
+            // Killed before the test's own timeout, so a hung CLI doesn't outlive its run holding
+            // a connection, which would stop the next run's setup reclaiming that run's databases.
             timeout: 12_000,
           },
         );

@@ -196,7 +196,7 @@ That keeps "patched the day it lands" possible without loosening the setting.
       - the service lists the child's open files with `lsof -p` and fails on any regular file, socket or lock file beyond its own pipes and Node's internal descriptors.
 
       The backend runs the same TCP and `localhost` lookup probes as a positive control, and they must succeed there. Every probe stays on this machine.
-- **`cli`** (`ROLE=cli`, through `src/main.ts`): `db migrate`, as `instante_owner` (all four steps below), and `db status`, as either role. Our migrations are reported on stdout, pg-boss's output on stderr. Exit codes: 0 done, 1 refused, 3 not current (`db status` with a migration pending, or pg-boss's schema not this release's or not whole), 64 usage, 78 configuration. Later modules add their owner commands here.
+- **`cli`** (`ROLE=cli`, through `src/main.ts`): `db migrate`, as `instante_owner` (all four steps below), and `db status`, as either role. Our migrations are reported on stdout, pg-boss's output on stderr. Exit codes: 0 done, 1 refused, 3 not current (`db status` with a migration pending, or pg-boss's schema not this release's, not whole, or not readable as the app role because a migrate stopped before its grants), 64 usage, 78 configuration. Later modules add their owner commands here.
 
 Every Instante process, the web server included, starts with `--disable-sigusr1` on its own command line, not through `NODE_OPTIONS`.
 

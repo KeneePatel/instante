@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import type { Job, JobAttempt } from 'pg-boss';
+import type { Job, JobAttempt, PgBoss } from 'pg-boss';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runCli } from '../src/cli/db.ts';
 import { manualClock } from '../src/kit/clock.ts';
@@ -125,6 +125,10 @@ describe('cli db migrate', () => {
   it('migrate refuses, and status reports, a pg-boss schema newer than this release’s', async () => {
     const db = await testDatabase();
     await asOwner(db, (client) => client.query('UPDATE pgboss.version SET version = version + 1'));
+    // A refused step 2 stops before the grants: one taken away stays away.
+    await asOwner(db, (client) =>
+      client.query('REVOKE INSERT ON pgboss.job_common FROM instante_app'),
+    );
     const problem = `pg-boss: schema ${String(PGBOSS_SCHEMA_VERSION + 1)}; ${needs}`;
     const printed: string[] = [];
     const logged: string[] = [];
@@ -134,6 +138,12 @@ describe('cli db migrate', () => {
       'Nothing to apply: the database is current.',
       `The migrations can't run:\n- ${problem}`,
     ]);
+    await asOwner(db, async (client) => {
+      const { rows } = await client.query(
+        "SELECT has_table_privilege('instante_app', 'pgboss.job_common', 'INSERT') AS insert",
+      );
+      expect(rows).toEqual([{ insert: false }]);
+    });
     logged.length = 0;
     expect(await runCli(config(db, ['app']), ['db', 'status'], () => {}, log)).toBe(3);
     expect(logged).toEqual([problem]);
@@ -160,6 +170,76 @@ describe('cli db migrate', () => {
     expect(printed).toEqual([
       'Nothing to apply: the database is current.',
       `The migrations can't run:\n- ${problem}`,
+    ]);
+  }, 30_000);
+
+  it.each([
+    [
+      'a missing table',
+      'DROP TABLE pgboss.warning',
+      'missing table warning, missing index warning_i1',
+    ],
+    [
+      'an index rebuilt on other columns',
+      'DROP INDEX pgboss.job_common_i14; CREATE INDEX job_common_i14 ON pgboss.job_common (name)',
+      'changed index job_common_i14',
+    ],
+    [
+      'a column default dropped',
+      'ALTER TABLE pgboss.bam ALTER COLUMN status DROP DEFAULT',
+      'its functions, columns or constraints differ (`pg-boss doctor` lists them)',
+    ],
+  ])(
+    'migrate refuses, and status reports, %s in pg-boss’s schema',
+    async (_case, change, what) => {
+      const db = await testDatabase();
+      await asOwner(db, (client) => client.query(change));
+      const problem = `pg-boss: schema ${String(PGBOSS_SCHEMA_VERSION)} is incomplete: ${what}`;
+      const printed: string[] = [];
+      const logged: string[] = [];
+      const log = { log: (line: string) => logged.push(line) };
+      expect(await runCli(config(db, ['app']), ['db', 'status'], () => {}, log)).toBe(3);
+      expect(logged).toEqual([problem]);
+      expect(await runCli(config(db), ['db', 'migrate'], (l) => printed.push(l), log)).toBe(1);
+      expect(printed).toEqual([
+        'Nothing to apply: the database is current.',
+        `The migrations can't run:\n- ${problem}`,
+      ]);
+    },
+    30_000,
+  );
+
+  it('never runs a pgboss.bam row as the owner', async () => {
+    const db = await testDatabase();
+    // A planted row, due now: a pg-boss started as the owner with migrate: true would run it.
+    await asOwner(db, (client) =>
+      client.query(
+        `INSERT INTO pgboss.bam (name, version, status, table_name, command)
+           VALUES ('planted', 1, 'pending', 'job_common', 'CREATE TABLE pgboss.planted (id int)');
+         UPDATE pgboss.version SET bam_on = NULL`,
+      ),
+    );
+    expect(await runCli(config(db), ['db', 'migrate'], () => {}, { log: () => {} })).toBe(0);
+    await asOwner(db, async (client) => {
+      const { rows } = await client.query(
+        `SELECT (SELECT status FROM pgboss.bam WHERE name = 'planted') AS status,
+                to_regclass('pgboss.planted') IS NULL AS never_ran,
+                (SELECT bam_on FROM pgboss.version) AS bam_on`,
+      );
+      expect(rows).toEqual([{ status: 'pending', never_ran: true, bam_on: null }]);
+    });
+  }, 30_000);
+
+  it('status says, as the app role, that a migrate cut short before the grants left pg-boss unreadable', async () => {
+    const db = await emptyDatabase();
+    await asOwner(db, (client) => migrate(client, readMigrations()));
+    await runPgBossMigrate(urlFor(db, 'owner'), () => {});
+    const logged: string[] = [];
+    expect(
+      await runCli(config(db, ['app']), ['db', 'status'], () => {}, { log: (l) => logged.push(l) }),
+    ).toBe(3);
+    expect(logged).toEqual([
+      'pg-boss: schema not readable as instante_app; `cli db migrate` grants it',
     ]);
   }, 30_000);
 
@@ -207,6 +287,24 @@ describe('runPgBossMigrate', () => {
       expect(await queueSchemaVersion(client)).toBe(PGBOSS_SCHEMA_VERSION);
     });
   }, 30_000);
+
+  it('refuses when pg-boss’s CLI is killed by a signal, or can’t start at all', async () => {
+    const killed = ((...args: Parameters<typeof spawn>) =>
+      spawn(
+        process.execPath,
+        ['-e', "process.kill(process.pid, 'SIGKILL')"],
+        args[2],
+      )) as typeof spawn;
+    await expect(runPgBossMigrate('postgresql://unused', () => {}, killed)).rejects.toMatchObject({
+      name: 'MigrationError',
+      problems: ['pg-boss migrate exited with SIGKILL'],
+    });
+    const missing = ((...args: Parameters<typeof spawn>) =>
+      spawn('/nonexistent/instante-node', args[1], args[2])) as typeof spawn;
+    await expect(runPgBossMigrate('postgresql://unused', () => {}, missing)).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
 
   it('refuses when pg-boss’s CLI fails, passing on why', async () => {
     const logged: string[] = [];
@@ -369,6 +467,13 @@ describe('the queue pattern', () => {
     expect(await jobOf(boss, dropped)).toBeUndefined();
   });
 
+  it('refuses a job pg-boss refuses, so the request’s transaction rolls back', async () => {
+    const refusing = { send: () => Promise.resolve(null) } as unknown as PgBoss;
+    await expect(
+      db.transaction((tx) => sendInTx(refusing, tx, ping, { note: 'refused' })),
+    ).rejects.toThrow('sendInTx: skeleton-ping refused the job');
+  });
+
   it('writes the row and completes the job in one transaction, or does neither', async () => {
     await db.transaction((tx) => sendInTx(boss, tx, ping, { note: 'one' }));
     await db.transaction((tx) => sendInTx(boss, tx, ping, { note: 'two' }));
@@ -409,10 +514,10 @@ describe('completeInTx', () => {
     await boss.start();
     try {
       const id = await db.transaction((tx) => sendInTx(boss, tx, ping, { note: 'once' }));
-      const finish = (job: JobAttempt, pingId: string, note: string) =>
+      const finish = (job: JobAttempt, pingId: string, note: string, data?: object) =>
         db.transaction(async (tx) => {
           await recordPing(tx, { id: pingId, note });
-          await completeInTx(boss, tx, ping, job);
+          await completeInTx(boss, tx, ping, job, data);
         });
 
       const first = await fetchOne(boss);
@@ -425,10 +530,11 @@ describe('completeInTx', () => {
       await expect(
         finish(first, '01a1d6d4-6c3f-7bbb-8d32-3cec9c5a9747', 'over the retry'),
       ).rejects.toThrow(/no longer active/);
-      await finish(second, '01a1d6d4-6c3f-7ccc-8d32-3cec9c5a9747', 'the retry');
+      await finish(second, '01a1d6d4-6c3f-7ccc-8d32-3cec9c5a9747', 'the retry', { answer: 42 });
 
       expect((await listPings(db)).map((p) => p.note)).toEqual(['the retry']);
       expect(await jobOf(boss, id)).toMatchObject({ state: 'completed' });
+      expect(await jobOf(boss, id)).toMatchObject({ output: { answer: 42 } });
     } finally {
       await boss.stop({ graceful: false, close: true });
       await pool.end();

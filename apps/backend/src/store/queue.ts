@@ -49,6 +49,16 @@ export async function queueSchemaVersion(client: pg.ClientBase): Promise<number 
  * committed its version leaves an index invalid or missing, and nothing builds it later.
  */
 export async function queueSchemaProblems(client: pg.ClientBase): Promise<string[]> {
+  // A migrate cut short between pg-boss's install and the grants leaves a schema the app role
+  // can't read, so `db status` as that role reports it rather than failing on it.
+  const { rows } = await client.query<{ unreadable: boolean; role: string }>(
+    `SELECT s.oid IS NOT NULL AND NOT has_schema_privilege(s.oid, 'USAGE') AS unreadable,
+            current_user AS role
+       FROM (SELECT to_regnamespace('pgboss') AS oid) s`,
+  );
+  if (rows[0]?.unreadable === true) {
+    return [`pg-boss: schema not readable as ${rows[0].role}; \`cli db migrate\` grants it`];
+  }
   const version = await queueSchemaVersion(client);
   const needs = `this release needs ${String(PGBOSS_SCHEMA_VERSION)}`;
   if (version === null) return [`pg-boss: schema not installed; ${needs}`];

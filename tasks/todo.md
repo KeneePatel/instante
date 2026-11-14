@@ -167,6 +167,10 @@
     - the app role can't write `pgboss.bam`;
     - the architecture's queue names use dots, since pg-boss refuses colons;
     - a test for each surviving mutant.
+  - **Second review (fixed):**
+    - `db status` as the app role reports, instead of crashing on, a pg-boss schema it can't read yet (a migrate stopped between pg-boss's install and the grants);
+    - tests for the rest of the drift check (a missing table, a changed index, other drift), a planted `pgboss.bam` row never running, a refused migrate changing no grant, a killed or missing pg-boss child, a job pg-boss refuses, and `completeInTx`'s output;
+    - accepted as equivalent: an unawaited `boss.stop` on a refused start, whose connection still closes within moments.
   - **Carried forward:**
     - T12 adds the document service's check beside `failingChecks` in `start.ts`;
     - the worker entry point needs the boss, which `start()` doesn't return yet;
