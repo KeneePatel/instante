@@ -2,13 +2,13 @@ import pg from 'pg';
 import type { CliConfig } from '../kit/config.ts';
 import { sanitize } from '../kit/sanitize.ts';
 import { MigrationError, migrate, migrationStatus, readMigrations } from '../store/migrate.ts';
-import { PGBOSS_SCHEMA_VERSION, migrateQueue, queueSchemaVersion } from '../store/queue.ts';
+import { migrateQueue, queueSchemaProblems } from '../store/queue.ts';
 
 // The owner's database commands (docs/specs/platform.md, "cli"):
 //   cli db migrate   applies pending migrations, then pg-boss's own, its grants and the queues,
 //                    as instante_owner
 //   cli db status    lists applied and pending migrations; exits 3 when any is pending, or
-//                    when pg-boss's schema isn't this release's
+//                    when pg-boss's schema isn't this release's, whole
 // Our migrations are reported on `print` (stdout); pg-boss's on `log` (stderr).
 // Later modules add their commands beside these.
 
@@ -54,14 +54,9 @@ export async function runCli(
     const { applied, pending } = await migrationStatus(client, migrations);
     for (const row of applied) print(`applied  ${row.name}  ${row.appliedAt.toISOString()}`);
     for (const migration of pending) print(`pending  ${migration.name}`);
-    const queue = await queueSchemaVersion(client);
-    if (queue !== PGBOSS_SCHEMA_VERSION) {
-      log(
-        `pg-boss: schema ${queue === null ? 'not installed' : String(queue)}; ` +
-          `this release needs ${String(PGBOSS_SCHEMA_VERSION)}`,
-      );
-    }
-    return pending.length === 0 && queue === PGBOSS_SCHEMA_VERSION ? 0 : 3;
+    const queue = await queueSchemaProblems(client);
+    for (const problem of queue) log(problem);
+    return pending.length === 0 && queue.length === 0 ? 0 : 3;
   } catch (error) {
     if (!(error instanceof MigrationError)) throw error;
     print(error.message);

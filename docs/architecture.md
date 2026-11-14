@@ -335,7 +335,7 @@ The details and their sources are in [ADR-004](decisions/ADR-004-supabase-auth.m
 
 ### Importing a resume
 
-1. The API checks the type by content, the caps and the person's daily import limit. It stores the upload in `stored_file`, creates `resume_import` and enqueues `resume:import` (interactive lane).
+1. The API checks the type by content, the caps and the person's daily import limit. It stores the upload in `stored_file`, creates `resume_import` and enqueues `resume.import` (interactive lane).
 2. The backend sends the file to the document service, which extracts the text layer in a child process: unpdf with `isEvalSupported: false`, or mammoth with external files off, within zip-entry and ratio limits.
 3. **The call** ([what reaches the model](#what-reaches-the-model)): a PDF goes inline, whole (option A, the owner's choice). DOCX and pasted text go as the redacted text layer. The schema has separate outputs for work status, citizenship, date of birth, photo and home address, which never enter the master.
 4. **Checks:** code assigns ids and normalizes ligatures, hyphens and quotes, then checks both ways:
@@ -372,7 +372,7 @@ The owner adds a requested board with `sources add <link>`. Only the five hosted
 
 ### A screening run for one person
 
-1. **Candidates:** visible open jobs that are new, changed or stale since the person's last run, and that they haven't acted on, plus stale saved jobs. Runs are coalesced as the limits table says. A pasted posting or a single re-screen goes to `screen:job` in the interactive lane instead. Each run counts against the person's daily screening limit.
+1. **Candidates:** visible open jobs that are new, changed or stale since the person's last run, and that they haven't acted on, plus stale saved jobs. Runs are coalesced as the limits table says. A pasted posting or a single re-screen goes to `screen.job` in the interactive lane instead. Each run counts against the person's daily screening limit.
 2. **Filters in code:** places, work type, roles and titles, level from the title, posting age, keywords, hidden companies. The first failing rule is written as `filtered`. Unclear locations pass only when the person includes them.
 3. **Order:** the longest-waiting first, then the newest posted. A new person's first 20 go first.
 4. **The call:** one structured-output call with the posting and the AI view. Code then:
@@ -394,7 +394,7 @@ The owner adds a requested board with `sources add <link>`. Only the five hosted
 
 ### Making a tailored resume
 
-1. `POST /api/tailored-resumes {jobId}` checks the person's daily build limit, creates the row and enqueues `resume:tailor` in the interactive lane.
+1. `POST /api/tailored-resumes {jobId}` checks the person's daily build limit, creates the row and enqueues `resume.tailor` in the interactive lane.
 2. **The input:**
    - the job's stored requirement list and facts. If the job has no analysis for this person, the build makes one first, outside the screening limit and the 90% pause;
    - the AI view, with its numbered placeholders;
@@ -419,21 +419,23 @@ The owner adds a requested board with `sources add <link>`. Only the five hosted
 
 ## Background work and lanes
 
+Queue names use only letters, digits, `_`, `-`, `.` and `/`, as pg-boss requires.
+
 | Queue | Does | When |
 |---|---|---|
-| `sources:due` | finds due boards and enqueues one read each, keyed by board | every minute |
-| `sources:fetch` | reads one board | one at a time per board |
-| `screen:user` | one person's coalesced run | as the limits table says; one at a time per person |
-| `screen:job` | one pasted posting or single re-screen | on request (interactive lane) |
-| `resume:import` | one import | on upload (interactive lane) |
-| `resume:tailor` | one tailored resume, including its analysis if missing | on request (interactive lane) |
-| `ai:resume` | re-enqueues every paused subject in one transaction | on `ai resume`, and at the month rollover for budget pauses |
+| `sources.due` | finds due boards and enqueues one read each, keyed by board | every minute |
+| `sources.fetch` | reads one board | one at a time per board |
+| `screen.user` | one person's coalesced run | as the limits table says; one at a time per person |
+| `screen.job` | one pasted posting or single re-screen | on request (interactive lane) |
+| `resume.import` | one import | on upload (interactive lane) |
+| `resume.tailor` | one tailored resume, including its analysis if missing | on request (interactive lane) |
+| `ai.resume` | re-enqueues every paused subject in one transaction | on `ai resume`, and at the month rollover for budget pauses |
 | `retention` | the deletions in the tables above, and queue pruning | daily |
 
 - **AI lanes:** the in-flight limit from the limits table, with one slot reserved for the interactive lane. Scheduled screening runs round-robin across people, in chunks of 10.
 - **Job state:**
   - one source of truth per job: the subject's row;
-  - slow work (AI calls, fetches, parsing) happens outside any transaction; then one short transaction writes the result through `store` and completes the job (`complete(…, { db: fromDrizzle(tx, sql) })`), so a rollback leaves neither;
+  - slow work (AI calls, fetches, parsing) happens outside any transaction; then one short transaction writes the result through `store` and completes the job (`completeInTx`, fenced to the attempt that was fetched, with `{ db: fromDrizzle(tx, sql) }`), so a rollback leaves neither and a late attempt writes nothing;
   - each queue's dead-letter handler marks the row failed with an error code;
   - handlers are idempotent and reuse a stored AI reply on retry;
   - a handler that meets a pause sets its subject to `paused` and completes its pg-boss job, so nothing retries or fails;

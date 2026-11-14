@@ -158,6 +158,20 @@
   - **Acceptance:** a committed transaction writes the row and completes the job, and a rolled-back one leaves neither (platform spec 5); `/readyz` fails on a pg-boss schema mismatch.
   - **Verify:** `pnpm --filter @instante/backend test -- queue`.
   - **Depends on:** T8, T10. **Files:** `src/cli/db.ts`, `src/store/{queue,readiness}.ts`, `src/api/handlers/readyz.ts`, `test/queue.test.ts`, plus edits to `src/start.ts` (the pool and pg-boss started at start) and the test harness (the template gets all of `cli db migrate`). **Size:** M.
+  - **Review (fixed):**
+    - `completeInTx` takes the fetched job, so pg-boss completes only that attempt, and refuses unless it completed it;
+    - the `pg-boss migrate` child gets `--disable-sigusr1`, pg-boss's own folder and only the URL;
+    - `migrate` refuses, and `status` reports, a pg-boss schema that is newer or incomplete (pg-boss's drift check);
+    - a refused start closes pg-boss's pool;
+    - pg-boss's warnings are logged;
+    - the app role can't write `pgboss.bam`;
+    - the architecture's queue names use dots, since pg-boss refuses colons;
+    - a test for each surviving mutant.
+  - **Carried forward:**
+    - T12 adds the document service's check beside `failingChecks` in `start.ts`;
+    - the worker entry point needs the boss, which `start()` doesn't return yet;
+    - once queues carry options (retention, dead letters), step 4 updates existing queues' options too;
+    - accounts add a cancel-in-a-transaction helper beside `sendInTx` and `completeInTx`.
 
 ### Checkpoint 2
 - [x] `check:task` green; integration tests on Postgres 18 with the pinned locale, locally and in CI.

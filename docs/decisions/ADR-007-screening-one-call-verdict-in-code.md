@@ -64,8 +64,8 @@ Accepted 2026-11-13 at the phase 1 gate. Proposed 2026-11-12 and revised after t
 
 6. **List requirements**, confirmed by the owner at the phase 2 gate: a list in one sentence ("Go, PostgreSQL and Kafka") stays one requirement. It's met when every item is shown (or any one, for "one of"), partly met when some are, and not met when none are.
 7. **When it runs:**
-   - **Scheduled:** `screen:user` runs per person, coalesced as the limits table says.
-   - **Interactive:** `screen:job` handles a pasted posting or a single re-screen in the interactive lane.
+   - **Scheduled:** `screen.user` runs per person, coalesced as the limits table says.
+   - **Interactive:** `screen.job` handles a pasted posting or a single re-screen in the interactive lane.
    - **Changed postings:** a changed posting (by its normalized hash) is screened again for people who haven't acted on it.
    - **After a resume change** (the AI view's hash changes): the person's open No and Maybe rows, saved ones included, become stale. Yes rows become stale only when a line they cite was removed or changed (compared after normalizing whitespace, punctuation and case). Stale rows are re-screened when the person presses "Re-screen N jobs", or automatically after 6 hours without a save, at most once a day. New postings go first.
    - **Daily limit:** everything above counts against the person's daily screening limit.
@@ -125,7 +125,7 @@ Single-model reviews; the owner chose to skip a cross-model second opinion.
   - "US-only remote jobs screened per person": valid at first fixed with a shared move, which cycle 3 reversed.
   - "Same pairs tune and gate": valid. A held-out set.
   - "`verdict replay` isn't read-only": valid. Split.
-  - "Pasted postings waited behind the coalesced run": valid. `screen:job`.
+  - "Pasted postings waited behind the coalesced run": valid. `screen.job`.
   - "Eligibility rules listed differently in three places": valid. One list.
 - **Cycle 3:**
   - "One person's screening could remove a job for everyone": valid. The remote-region finding now filters for that person only, with Bring back.

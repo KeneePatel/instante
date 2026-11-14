@@ -168,17 +168,17 @@ That keeps "patched the day it lands" possible without loosening the setting.
   - `0002_skeleton.sql`: a `skeleton_ping` table, used by the queue check below.
 - **`cli db migrate`,** run as `instante_owner` (by a release on the Mac, or by `scripts/dev-db.sh` and the tests), in this order:
   1. our runner;
-  2. pg-boss's own `pg-boss migrate` command, with the owner's URL in `PGBOSS_DATABASE_URL`, never on the command line. It builds pg-boss's indexes in the same run, which a process started with `migrate: false` never would;
-  3. idempotent grants letting `instante_app` use pg-boss's schema, its tables and its functions;
-  4. the queues, created as the owner, since the app role can't create their partitions.
+  2. pg-boss's own `pg-boss migrate` command, as a child started like every Instante process with `--disable-sigusr1`, with the owner's URL in `PGBOSS_DATABASE_URL` (its only environment name, never on the command line), and in pg-boss's own folder, so no `pgboss.json` or `.pgbossrc` where `cli` was started is read. It builds pg-boss's indexes in the same run, which a process started with `migrate: false` never would. Then pg-boss's schema must be this release's and whole: an index build cut short after pg-boss committed its version leaves an index invalid or missing, nothing builds it later, and a rerun of `pg-boss migrate` only checks the version. pg-boss's own read-only drift check finds it, and the step refuses, naming each index; the owner restores the dump taken before the release;
+  3. idempotent grants letting `instante_app` use pg-boss's schema, read and write its tables' rows, and use its functions, for what the owner creates there later too. The exception is writing `pgboss.bam`, whose rows are statements a pg-boss started with `migrate: true` as the owner would run; nothing does, but the app role can't plant one either;
+  4. the queues, created as the owner, since the app role can't create their partitions. Only missing queues are created: once queues carry options, this step also updates the options of existing ones.
 
-  The app starts pg-boss with `migrate: false` and `persistQueueStats: false`, and `/readyz` fails if pg-boss's schema version isn't the one the code expects.
+  The app starts pg-boss with `migrate: false` and `persistQueueStats: false`, and `/readyz` fails if pg-boss's schema version isn't the one the code expects. pg-boss's errors are logged as `queue.error`, and its warnings as `queue.warning` with their message only, since a slow query's data carries its values. A warning that a job index is bloated means the owner rebuilds it with `pg-boss reindex`, as the app role doesn't own the indexes; nothing does this automatically, since one person's job table stays small.
 - **The queue pattern every module uses,** proved here with `skeleton_ping`:
   - slow work (AI calls, fetches, parsing) happens outside any transaction;
-  - then one short Drizzle transaction writes the result through `store` and completes the job with `complete(name, id, data, { db: fromDrizzle(tx, sql) })`;
-  - jobs created by a request are sent inside the request's own transaction with `send(name, data, { db: fromDrizzle(tx, sql) })`.
+  - then one short Drizzle transaction writes the result through `store` and completes the job with `completeInTx`: pg-boss's `complete(name, { id, retryCount }, data, { db: fromDrizzle(tx, sql) })`, fenced to the attempt that was fetched, and refusing (so the transaction rolls back) unless it completed exactly that attempt, since the job may have failed, expired or been fetched again during the slow work;
+  - jobs created by a request are sent inside the request's own transaction with `sendInTx`: `send(name, data, { db: fromDrizzle(tx, sql) })`.
 
-  A rollback leaves neither the row nor the job's completion.
+  A rollback leaves neither the row nor the job's completion, and a late attempt writes nothing.
 - **`documents`** (`ROLE=documents`): a Hono app on the Unix socket `DOCUMENTS_SOCKET`, with no TCP port and one route, `POST /run/:task`. It's started with only its own environment names, and no secret or database URL.
   - **At start,** it walks the code it will grant to its children (the backend source, `packages/contract` and `node_modules/.pnpm`, by real path) and refuses to run if any symlink there points outside them.
   - **Each job** gets a folder from `fs.mkdtemp`. The service writes the input bytes itself, never unpacks an archive to disk, and refuses anything in the folder that isn't a regular file with one link.
@@ -196,7 +196,7 @@ That keeps "patched the day it lands" possible without loosening the setting.
       - the service lists the child's open files with `lsof -p` and fails on any regular file, socket or lock file beyond its own pipes and Node's internal descriptors.
 
       The backend runs the same TCP and `localhost` lookup probes as a positive control, and they must succeed there. Every probe stays on this machine.
-- **`cli`** (`ROLE=cli`, through `src/main.ts`): `db migrate`, as `instante_owner` (all four steps below), and `db status`, as either role. Our migrations are reported on stdout, pg-boss's output on stderr. Exit codes: 0 done, 1 refused, 3 not current (`db status` with a migration pending, or pg-boss's schema not this release's), 64 usage, 78 configuration. Later modules add their owner commands here.
+- **`cli`** (`ROLE=cli`, through `src/main.ts`): `db migrate`, as `instante_owner` (all four steps below), and `db status`, as either role. Our migrations are reported on stdout, pg-boss's output on stderr. Exit codes: 0 done, 1 refused, 3 not current (`db status` with a migration pending, or pg-boss's schema not this release's or not whole), 64 usage, 78 configuration. Later modules add their owner commands here.
 
 Every Instante process, the web server included, starts with `--disable-sigusr1` on its own command line, not through `NODE_OPTIONS`.
 

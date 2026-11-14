@@ -10,7 +10,14 @@ import { PINNED_NODE } from '../src/kit/config.ts';
 import { manualClock } from '../src/kit/clock.ts';
 import type { Sink } from '../src/kit/logger.ts';
 import { start, type Running } from '../src/start.ts';
-import { dropTestDatabases, testDatabase, urlFor } from './db-harness.ts';
+import {
+  asOwner,
+  dropTestDatabases,
+  emptyDatabase,
+  openSessions,
+  testDatabase,
+  urlFor,
+} from './db-harness.ts';
 
 // The backend started for real, on loopback: requests over a socket carry their own Host
 // header, unlike app.request.
@@ -287,6 +294,59 @@ describe('start', () => {
     await closed;
   });
 
+  it.each([
+    ['behind', 'UPDATE pgboss.version SET version = version - 1', /requires migrations/],
+    ['ahead', 'UPDATE pgboss.version SET version = version + 1', /requires migrations/],
+  ])(
+    'refuses a pg-boss schema %s this release’s, leaving no connection open',
+    async (_direction, change, reason) => {
+      const database = await testDatabase();
+      await asOwner(database, (client) => client.query(change));
+      const url = urlFor(database, 'app');
+      const port = await freePort();
+      await expect(
+        start({ env: envFor(port), runtime: { ...runtime, readFile: () => url }, sink: quiet }),
+      ).rejects.toThrow(reason);
+      expect(await openSessions(database, ['instante', 'instante-queue'], 2000)).toBe(0);
+    },
+  );
+
+  it('refuses a database without pg-boss, leaving no connection open', async () => {
+    const database = await emptyDatabase();
+    const url = urlFor(database, 'app');
+    const port = await freePort();
+    await expect(
+      start({ env: envFor(port), runtime: { ...runtime, readFile: () => url }, sink: quiet }),
+    ).rejects.toThrow(/not installed/);
+    expect(await openSessions(database, ['instante', 'instante-queue'], 2000)).toBe(0);
+  });
+
+  it('answers /readyz from its own checks, and closes every connection when it stops', async () => {
+    const database = await testDatabase();
+    const url = urlFor(database, 'app');
+    const port = await freePort();
+    const server = await start({
+      env: envFor(port),
+      runtime: { ...runtime, readFile: () => url },
+      sink: quiet,
+    });
+    const own = { host: `127.0.0.1:${String(port)}` };
+    try {
+      const ready = await get(port, '/readyz', own);
+      expect(ready.status).toBe(200);
+      expect(JSON.parse(ready.body)).toEqual({ ok: true, failed: [] });
+      await asOwner(database, (client) =>
+        client.query("DELETE FROM schema_migrations WHERE name = '0002_skeleton'"),
+      );
+      const failing = await get(port, '/readyz', own);
+      expect(failing.status).toBe(503);
+      expect(JSON.parse(failing.body)).toEqual({ ok: false, failed: ['migrations'] });
+    } finally {
+      await server.close();
+    }
+    expect(await openSessions(database, ['instante', 'instante-queue'], 2000)).toBe(0);
+  });
+
   it('refuses a role this release has nothing to run for', async () => {
     const env = { INSTANTE_ENV: 'test', ROLE: 'documents', DOCUMENTS_SOCKET: '/tmp/d.sock' };
     await expect(start({ env })).rejects.toThrow(/ROLE=documents has nothing to run/);
@@ -297,9 +357,11 @@ describe('main.ts', () => {
   const main = path.resolve(import.meta.dirname, '../src/main.ts');
 
   function run(env: Record<string, string>) {
+    // Killed before the test's own timeout, so none outlives a failed run holding a connection.
     const child = spawn(process.execPath, ['--disable-sigusr1', main], {
       env: { PATH: process.env['PATH'] ?? '', ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 12_000,
     });
     let out = '';
     let err = '';
@@ -341,8 +403,11 @@ describe('main.ts', () => {
     await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
     const { port } = blocker.address() as AddressInfo;
     try {
+      const began = Date.now();
       const { exited, output } = run(envFor(port));
       expect(await exited).toBe(1);
+      // Its pool and pg-boss's are closed too, so it doesn't wait out their idle timeouts.
+      expect(Date.now() - began).toBeLessThan(5000);
       expect(output().err).toMatch(/"event":"start.failed"/);
       expect(output().err).toMatch(/EADDRINUSE/);
     } finally {

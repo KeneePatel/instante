@@ -54,6 +54,11 @@ export async function start(options: StartOptions): Promise<Running> {
   try {
     await boss.start();
   } catch (error) {
+    // pg-boss opens its pool before it checks the schema, so a refused start still holds a
+    // connection, and the process would wait out its idle timeout before exiting.
+    await boss.stop({ graceful: false, close: true }).catch((stopError: unknown) => {
+      logger.warn('queue.stop_failed', { error: stopError });
+    });
     await pool.end();
     throw error;
   }

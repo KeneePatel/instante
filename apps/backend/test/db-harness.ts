@@ -109,6 +109,29 @@ export async function dropDatabase(name: string): Promise<void> {
   }
 }
 
+/**
+ * How many connections the named applications hold to a database. With `withinMs`, it waits up
+ * to that long for them to close first, since a closed client leaves pg_stat_activity shortly after.
+ */
+export async function openSessions(
+  database: string,
+  applications: readonly string[],
+  withinMs = 0,
+): Promise<number> {
+  const deadline = Date.now() + withinMs;
+  for (;;) {
+    const count = await asAdmin(database, async (client) => {
+      const { rows } = await client.query<{ n: number }>(
+        'SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = $1 AND application_name = ANY($2)',
+        [database, applications],
+      );
+      return rows[0]?.n ?? 0;
+    });
+    if (count === 0 || Date.now() >= deadline) return count;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 export async function asOwner<T>(database: string, work: (client: pg.Client) => Promise<T>) {
   return as(urlFor(database, 'owner'), work);
 }
