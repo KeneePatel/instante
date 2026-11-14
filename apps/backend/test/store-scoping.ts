@@ -31,14 +31,17 @@ export function sourcesUnder(folder: string): string[] {
 }
 
 export function scopingViolations(input: ScopingInput): string[] {
+  // Only the files given: names resolve between them, and nothing else is loaded (Drizzle's and
+  // Node's types would take seconds, and say nothing about which table a name is).
   const program = ts.createProgram([...input.files, input.schemaFile, input.personFile], {
     target: ts.ScriptTarget.ES2024,
     module: ts.ModuleKind.NodeNext,
     moduleResolution: ts.ModuleResolutionKind.NodeNext,
     allowImportingTsExtensions: true,
     noEmit: true,
-    strict: true,
-    skipLibCheck: true,
+    noResolve: true,
+    noLib: true,
+    types: [],
   });
   const checker = program.getTypeChecker();
   const resolve = (symbol: ts.Symbol | undefined): ts.Symbol | undefined =>
