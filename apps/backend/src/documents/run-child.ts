@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 // - Node's permission model, reading only the job's folder and the granted code, with no
 //   writes, child processes, workers, addons or network (all denied unless allowed);
 // - --disable-sigusr1, so nothing can open its inspector, and a 256 MB heap;
+// - no node:sqlite, which writes files the permission model doesn't check;
 // - an empty environment, so no NODE_OPTIONS and nothing of the service's own;
 // - three pipes and nothing else: no IPC channel, no other file descriptor;
 // - 30 seconds, then a kill.
@@ -15,8 +16,9 @@ export const CHILD_TIMEOUT_MS = 30_000;
 export const CHILD_HEAP_MB = 256;
 /** The most a child may write on stdout, its result; past it, it's killed. */
 export const MAX_CHILD_OUTPUT_BYTES = 64 * 1024 * 1024;
-/** What's kept of a child's stderr, for the log. */
-const MAX_CHILD_STDERR_BYTES = 64 * 1024;
+/** What's kept of a child's stderr, in bytes; the log line holds the logger's 2,000 characters
+ * of it. */
+export const MAX_CHILD_STDERR_BYTES = 64 * 1024;
 
 export type ChildRun = {
   /** The task's script: an absolute path inside one of `grants`. */
@@ -50,6 +52,7 @@ export function childArgs(run: Pick<ChildRun, 'script' | 'args' | 'jobFolder' | 
     '--permission',
     '--disable-sigusr1',
     `--max-old-space-size=${String(CHILD_HEAP_MB)}`,
+    '--no-experimental-sqlite',
     ...[run.jobFolder, ...run.grants].map((path) => `--allow-fs-read=${path}`),
     run.script,
     ...run.args,
@@ -73,7 +76,8 @@ export function runChild(run: ChildRun): Promise<ChildResult> {
 
     const out: Buffer[] = [];
     let outBytes = 0;
-    let stderr = '';
+    const err: Buffer[] = [];
+    let errBytes = 0;
     let stopped: 'timed_out' | 'too_much_output' | 'stopped' | undefined;
     const stop = (why: NonNullable<typeof stopped>) => {
       stopped ??= why;
@@ -93,8 +97,13 @@ export function runChild(run: ChildRun): Promise<ChildResult> {
       if (outBytes > maxOutputBytes) stop('too_much_output');
       else out.push(chunk);
     });
+    // Read to the end, so the child never blocks on a full pipe, but only the first bytes kept.
     child.stderr.on('data', (chunk: Buffer) => {
-      if (stderr.length < MAX_CHILD_STDERR_BYTES) stderr += chunk.toString('utf8');
+      // Even an empty view would keep the whole chunk's memory.
+      if (errBytes === MAX_CHILD_STDERR_BYTES) return;
+      const kept = chunk.subarray(0, MAX_CHILD_STDERR_BYTES - errBytes);
+      err.push(kept);
+      errBytes += kept.length;
     });
     const settle = () => {
       clearTimeout(deadline);
@@ -107,7 +116,9 @@ export function runChild(run: ChildRun): Promise<ChildResult> {
     child.once('close', (code, signal) => {
       settle();
       const ms = Math.round(performance.now() - began);
-      stderr = stderr.slice(0, MAX_CHILD_STDERR_BYTES);
+      // Decoded once, so a character split between chunks survives; `stream` drops the last
+      // character when the cap cut it in two.
+      const stderr = new TextDecoder().decode(Buffer.concat(err), { stream: true });
       if (stopped === undefined && code === 0) {
         resolve({ ok: true, stdout: Buffer.concat(out), stderr, ms });
       } else {

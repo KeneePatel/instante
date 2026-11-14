@@ -202,6 +202,19 @@
     - `/readyz` needed no change to its handler: `start.ts` adds `documents` beside `failingChecks`, checked by `echo` on an empty input;
     - the decisions the spec didn't name (the socket's folder, a stale socket, the input, result and reply caps, the error codes) are now in the platform spec's `documents` section;
     - on macOS, a child's environment holds `__CF_USER_TEXT_ENCODING`, which CoreFoundation sets inside every process; the spawn passes none. T13's `selftest` allows exactly that name on macOS.
+  - **Review (fixed):**
+    - children start with `--no-experimental-sqlite`: on Node 26, `node:sqlite` creates and writes database files outside the grants, which the permission model doesn't check, so a child could write after all. The flag removes the module; a test tries both kinds of write;
+    - stopping waits for the jobs still running, so each job's folder (holding the input) is removed before the service exits, and the `stopped` line is logged;
+    - anything at the socket's path that isn't a socket refuses, checked before binding: macOS's `bind()` follows a symlink that points nowhere, which would put the socket outside the checked folder;
+    - a child's stderr is kept to its first 64 KiB in bytes, decoded once, not 64 Ki characters;
+    - the input cap is 50 MB (50,000,000 bytes), as the spec writes it, not 50 MiB;
+    - a socket folder someone else owns is refused for its owner, not its mode;
+    - tests for what the mutants showed unpinned: the granted code's paths and what a child can read with them, stopping killing children (and a stop that came first), the output cap at its boundary and its reply, stderr's cap, the defaults that run (30, 25 and 5 seconds) and the deadlines cleared, the streams being the service's own pipes with stdin ended, the input file's `0600`, the socket's `0600` and every folder mode, the 404 for other routes, a job that can't start, the log lines' fields, readiness's length and status checks, and `/readyz` naming its own failures and the document service's together.
+  - **Carried forward:**
+    - T13: pnpm links the workspace packages into `node_modules/.pnpm/node_modules/@instante/`, pointing at `apps/web` and `apps/backend`, so a child can read those through the granted code. The start-up walk rightly refuses them; `hoistWorkspacePackages: false` in `pnpm-workspace.yaml` removes them (tried by the review: the lockfile is unchanged and every check passes).
+    - T22: the 30-second kill is a timer in the service, so a child outlives a service killed outright. `stop`, and the launcher when a process exits, signal the process group, which the children share.
+    - Accepted under R2, as the threat model already says: a child can still signal the owner's processes, and make one without `--disable-sigusr1` open its debugger (every Instante process has the flag, and the child has no network to reach it).
+    - Two services started at once on one stale socket can both bind, and a start that fails after binding leaves its server open. Only the owner's own processes could race there, and T22's `lockf` lock stops a second copy.
 
 - [ ] **T13: The document service's isolation checks** (**review**)
   - **Does:**

@@ -365,17 +365,24 @@ describe('start', () => {
     expect(await openSessions(database, ['instante', 'instante-queue'], 2000)).toBe(0);
   });
 
-  it('names the document service in /readyz when it doesn’t answer', async () => {
+  it('names the document service in /readyz when it doesn’t answer, after its own checks', async () => {
+    const database = await testDatabase();
+    const url = urlFor(database, 'app');
     const port = await freePort();
     const server = await start({
       env: { ...envFor(port), DOCUMENTS_SOCKET: path.join(folder, 'nobody-here.sock') },
-      runtime,
+      runtime: { ...runtime, readFile: () => url },
       sink: quiet,
     });
     try {
       const reply = await get(port, '/readyz', { host: `127.0.0.1:${String(port)}` });
       expect(reply.status).toBe(503);
       expect(JSON.parse(reply.body)).toEqual({ ok: false, failed: ['documents'] });
+      await asOwner(database, (client) =>
+        client.query("DELETE FROM schema_migrations WHERE name = '0002_skeleton'"),
+      );
+      const both = await get(port, '/readyz', { host: `127.0.0.1:${String(port)}` });
+      expect(JSON.parse(both.body)).toEqual({ ok: false, failed: ['migrations', 'documents'] });
     } finally {
       await server.close();
     }

@@ -34,8 +34,9 @@ export const TASKS: Readonly<Record<string, Task>> = {
 };
 
 /** The largest input any task takes: a job board's answer, 50 MB decompressed
- * (docs/architecture.md, "Limits"). Tasks check their own, smaller caps. */
-export const MAX_INPUT_BYTES = 50 * 1024 * 1024;
+ * (docs/architecture.md, "Limits"; the spec writes MiB where it means them). Tasks check their
+ * own, smaller caps. */
+export const MAX_INPUT_BYTES = 50_000_000;
 
 /** The repository (or a release folder) holding this file: apps/backend/src/documents/. */
 const ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -155,7 +156,18 @@ export async function startDocuments(options: StartDocumentsOptions): Promise<Ru
 
   const stopping = new AbortController();
   const app = createDocumentsApp({ ...options.documents, logger, signal: stopping.signal });
-  const server = createAdaptorServer({ fetch: app.fetch }) as Server;
+  // The requests still being handled: stopping waits for them, since each removes its job's
+  // folder only once its child is gone.
+  const handling = new Set<Promise<unknown>>();
+  const server = createAdaptorServer({
+    fetch: (request, env) => {
+      const reply: Promise<unknown> = Promise.resolve(app.fetch(request, env)).finally(() => {
+        handling.delete(reply);
+      });
+      handling.add(reply);
+      return reply;
+    },
+  }) as Server;
   await listenOn(server, socket);
   // The folder already keeps everyone else out; the socket itself is the owner's too.
   chmodSync(socket, 0o600);
@@ -172,6 +184,9 @@ export async function startDocuments(options: StartDocumentsOptions): Promise<Ru
         });
         server.closeAllConnections();
       });
+      // After the connections close, so a stalled upload can't hold the stop: its body read
+      // fails at once. The jobs end as their killed children do, each removing its folder.
+      await Promise.allSettled(handling);
       rmSync(socket, { force: true });
     },
   };
@@ -181,25 +196,32 @@ export async function startDocuments(options: StartDocumentsOptions): Promise<Ru
  * local user could connect to one in an open folder. */
 function privateFolder(folder: string): void {
   const stat = statSync(folder);
-  if (!stat.isDirectory()) throw new Error(`The document service's socket folder isn't a folder`);
-  if ((stat.mode & 0o077) !== 0 || stat.uid !== process.getuid?.()) {
-    throw new Error(
-      `The document service's socket folder must be yours, mode 0700, not ${(stat.mode & 0o777).toString(8)}`,
-    );
+  const where = "The document service's socket folder";
+  if (!stat.isDirectory()) throw new Error(`${where} isn't a folder`);
+  if (stat.uid !== process.getuid?.()) {
+    throw new Error(`${where} must be yours, not uid ${String(stat.uid)}'s`);
+  }
+  if ((stat.mode & 0o077) !== 0) {
+    throw new Error(`${where} must be yours, mode 0700, not ${(stat.mode & 0o777).toString(8)}`);
   }
 }
 
 /** Listens on the socket. A socket file left by a process that's gone (nothing answers on it)
- * is replaced; anything else in the way, or a service answering there, refuses. */
+ * is replaced; anything else at the path refuses, as does a service answering there. Checked
+ * before binding, since macOS's bind() follows a symlink that points nowhere and would put the
+ * socket outside the checked folder. */
 async function listenOn(server: Server, socket: string): Promise<void> {
-  try {
-    await listen(server, socket);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
-    if (!lstatSync(socket).isSocket() || (await answers(socket))) throw error;
+  const existing = lstatSync(socket, { throwIfNoEntry: false });
+  if (existing !== undefined) {
+    if (!existing.isSocket()) throw inUse(socket, "something that isn't a socket");
+    if (await answers(socket)) throw inUse(socket, 'a service that answers');
     rmSync(socket);
-    await listen(server, socket);
   }
+  await listen(server, socket);
+}
+
+function inUse(socket: string, by: string): Error {
+  return Object.assign(new Error(`${socket} is held by ${by}`), { code: 'EADDRINUSE' });
 }
 
 function listen(server: Server, socket: string): Promise<void> {
