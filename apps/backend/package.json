@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "cli": "ROLE=cli node --disable-sigusr1 src/main.ts",
-    "test": "vitest run --root ../.. --project backend",
+    "test": "vitest run --root ../.. --project backend --project backend-integration",
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
     "@hono/node-server": "2.1.6",
     "@instante/contract": "workspace:*",
+    "drizzle-orm": "0.45.4",
     "hono": "4.13.16",
     "pg": "8.23.1",
     "pg-connection-string": "2.14.1",

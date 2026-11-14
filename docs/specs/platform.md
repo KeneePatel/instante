@@ -347,7 +347,7 @@ The subcommands:
   - web on `127.0.0.1:3000`, opened at `http://localhost:3000`, its `ALLOWED_HOST`;
   - the backend (`ROLE=all`) on `127.0.0.1:8080`;
   - the document service on a socket in a short folder of its own under `$TMPDIR`, mode `0700`, because a checkout in a deep worktree can pass macOS's socket-path limit.
-- **Integration tests:** each test worker copies a migrated template database.
+- **Integration tests:** each run migrates one template database, and each test file copies it (`apps/backend/test/db-harness.ts`), adding the database-level rights a copy lacks; the run drops every database it made. Unit tests (`src/**/*.test.ts`) need no database.
 - **End-to-end tests:** Playwright's `webServer` starts the production build (web, backend, document service) on loopback with `INSTANTE_ENV=test`, in CI and on the Mac alike. `accounts` adds the fake Supabase as one more test-only server.
 
 ## Commands
@@ -444,7 +444,7 @@ export const ping: Handler<typeof routes.ping> = ({ clock }) => ({
 | Level | Tool | What it covers in `platform` |
 |---|---|---|
 | Unit | Vitest | `defineRoute` and `registerRoutes`; the id generator; the configuration parser and production guard (including a socket URL whose `host=` points elsewhere, and the reserved ports outside real use); the sanitizer; the migration runner's checks and its locale check; the CSP (development and production variants), `Host` and Fetch Metadata rules; `lib/api.ts`'s parsing and its `upstream_unavailable` mapping |
-| Integration | Vitest on Postgres 18, each worker on a copy of a migrated template database | migrations, grants and `pg-boss migrate`; the queue pattern (commit creates the row and completes the job, rollback leaves neither); routes through `app.request`, including the backend's `Host`, `X-Forwarded-Host` and Fetch Metadata checks; the document service over a socket, including `selftest`, the job-folder checks and the backend's positive control |
+| Integration | Vitest on Postgres 18, each test file on a copy of a migrated template database | migrations, grants and `pg-boss migrate`; the queue pattern (commit creates the row and completes the job, rollback leaves neither); routes through `app.request`, including the backend's `Host`, `X-Forwarded-Host` and Fetch Metadata checks; the document service over a socket, including `selftest`, the job-folder checks and the backend's positive control |
 | Contract | `tsc`, route tests | every reply parses; a route without auth or a handler fails to register; `Cache-Control` and `Vary` on every reply; test routes absent in production mode |
 | Unauthenticated matrix | generated from the route tables | every `user` route answers 401, including encoded paths and trailing slashes |
 | Production build | CI on Linux | it starts and `/readyz` answers; `src/` imports nothing from `test/`; with `INSTANTE_ENV=production`, a database URL off the socket, a non-loopback address or the wrong Node refuses to start; the web app's permission flags deny reading a secret |

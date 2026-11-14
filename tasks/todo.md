@@ -140,14 +140,14 @@
   - **Verify:** `scripts/dev-db.sh`; `pnpm --filter @instante/backend test -- migrate`.
   - **Depends on:** T7. **Files:** `src/store/{pool,migrate}.ts`, `migrations/{0001_baseline,0002_skeleton}.sql`, `src/cli/db.ts`, `scripts/dev-db.sh`, `test/db.ts` (each test's scratch database, until T10's harness) and `test/migrate.test.ts`, plus edits to `src/main.ts` and `ci.yml`. **Size:** M (two of the files are short SQL).
 
-- [ ] **T10: The development database and the integration harness** (**review:** store scoping)
+- [x] **T10: The development database and the integration harness** (**review:** store scoping)
   - **Does:**
-    - the harness, copying a migrated template database per test worker;
+    - the harness: one migrated template per run, copied by each integration test file (`test/global-setup.ts`, `test/db-harness.ts`); unit tests in `src/` run without a database;
     - each copy gets the database-level rights 0001 sets (no `TEMPORARY` or `CONNECT` for `PUBLIC`, `CONNECT` for `instante_app`), since `CREATE DATABASE … TEMPLATE` doesn't copy them;
-    - Drizzle over the pool, with the person-scoped store rule (every per-person store function takes the person's id).
+    - Drizzle over the pool, with the person-scoped store rule (every per-person store function takes the person's id, as a branded `PersonId`), held by a static check over `src/store/` and a database check (`user_id` NOT NULL and first in the primary key).
   - **Acceptance:** integration tests run on copies of the template, on Homebrew's Postgres 18 and in CI, with the pinned locale; T9's runner tests move onto the harness.
   - **Verify:** `pnpm --filter @instante/backend test -- store`.
-  - **Depends on:** T9. **Files:** `test/db-harness.ts`, `src/store/db.ts`, `test/store.test.ts`. **Size:** S.
+  - **Depends on:** T9. **Files:** `test/{global-setup,db-harness,store-scoping}.ts`, `src/store/{db,schema,person,skeleton}.ts`, `test/store.test.ts`, plus edits to `vitest.config.ts` and `test/migrate.test.ts`. **Size:** S.
 
 - [ ] **T11: The queue pattern**
   - **Does:**

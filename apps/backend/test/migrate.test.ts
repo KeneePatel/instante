@@ -26,17 +26,18 @@ import {
   asAdmin,
   asApp,
   asOwner,
-  dropScratchDatabases,
-  scratchDatabase,
+  dropTestDatabases,
+  emptyDatabase,
+  testDatabase,
   urlFor,
-} from './db.ts';
+} from './db-harness.ts';
 
 // The migration runner on a real Postgres 18 (docs/specs/platform.md, acceptance criterion 6):
 // it refuses a gap, an unknown name, a changed file and the wrong locale, and has no mode
 // that relaxes this.
 
 afterAll(async () => {
-  await dropScratchDatabases();
+  await dropTestDatabases();
 });
 
 const folders: string[] = [];
@@ -172,7 +173,7 @@ describe('readMigrations', () => {
 
 describe('migrate', () => {
   it('applies every migration once, in order, and records each name and hash', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     await asOwner(db, async (client) => {
       expect(await migrate(client, real)).toEqual(['0001_baseline', '0002_skeleton']);
       expect(await migrate(client, real)).toEqual([]);
@@ -188,7 +189,7 @@ describe('migrate', () => {
   });
 
   it('applies only what is pending', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     await asOwner(db, async (client) => {
       expect(await migrate(client, real.slice(0, 1))).toEqual(['0001_baseline']);
       expect((await migrationStatus(client, real)).pending.map((m) => m.name)).toEqual([
@@ -199,7 +200,7 @@ describe('migrate', () => {
   });
 
   it('refuses an applied migration that has no file', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     await asOwner(db, async (client) => {
       await migrate(client, real);
       await client.query("INSERT INTO schema_migrations VALUES ('0003_ghost', repeat('a', 64))");
@@ -211,7 +212,7 @@ describe('migrate', () => {
   });
 
   it('refuses migrations applied out of order', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     const [baseline, skeleton] = real as [Migration, Migration];
     const extra: Migration = { name: '0002_extra', sha256: 'b'.repeat(64), sql: 'SELECT 1;' };
     await asOwner(db, async (client) => {
@@ -224,7 +225,7 @@ describe('migrate', () => {
   });
 
   it('refuses a file changed since it was applied, and applies nothing more', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     const [baseline, skeleton] = real as [Migration, Migration];
     await asOwner(db, async (client) => {
       await migrate(client, [baseline]);
@@ -255,7 +256,7 @@ describe('migrate', () => {
       /icu C\.UTF-8/,
     ],
   ])('refuses a database with the wrong locale: %s', async (_case, locale, named) => {
-    const db = await scratchDatabase(locale);
+    const db = await emptyDatabase(locale);
     await asOwner(db, async (client) => {
       const problems = await problemsOf(() => migrate(client, real));
       expect(problems).toMatch(/migrations need UTF8, builtin C\.UTF-8/);
@@ -270,7 +271,7 @@ describe('migrate', () => {
     ['collation', "LC_COLLATE 'en_US.UTF-8' LC_CTYPE 'C'", /collates as en_US\.UTF-8\/C/],
     ['character type', "LC_COLLATE 'C' LC_CTYPE 'en_US.UTF-8'", /collates as C\/en_US\.UTF-8/],
   ])('refuses a database whose %s is not C', async (_case, lc, named) => {
-    const db = await scratchDatabase(
+    const db = await emptyDatabase(
       `ENCODING 'UTF8' LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8' ${lc}`,
     );
     await asOwner(db, async (client) => {
@@ -290,7 +291,7 @@ describe('migrate', () => {
 
   it('runs only as instante_owner, owning the database: never the app role or a superuser', async () => {
     const owned = /migrations run only as instante_owner, owning the database, and no superuser/;
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     await asApp(db, async (client) => {
       expect(await problemsOf(() => migrate(client, real))).toMatch(owned);
     });
@@ -323,7 +324,7 @@ describe('migrate', () => {
   });
 
   it('keeps nothing of a migration whose record fails, so it never runs twice', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     const unrecordable: Migration = {
       name: '0003_kept',
       sha256: 'not-a-sha',
@@ -344,7 +345,7 @@ describe('migrate', () => {
   ])(
     'refuses, as a second guard, SQL that ran %s past the file check, and records nothing',
     async (_case, sql) => {
-      const db = await scratchDatabase();
+      const db = await emptyDatabase();
       const sneaky: Migration = { name: '0003_sneaky', sha256: 'f'.repeat(64), sql };
       await asOwner(db, async (client) => {
         expect(await problemsOf(() => migrate(client, [...real, sneaky]))).toMatch(
@@ -359,7 +360,7 @@ describe('migrate', () => {
   );
 
   it('releases its lock when it returns or fails, with the session still open', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     const failing: Migration = {
       name: '0003_failing',
       sha256: 'a'.repeat(64),
@@ -383,7 +384,7 @@ describe('migrate', () => {
   });
 
   it('reads the record in name order, however its rows were stored', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     await asOwner(db, async (client) => {
       await migrate(client, real);
       await client.query(
@@ -395,7 +396,7 @@ describe('migrate', () => {
   });
 
   it('runs non-ASCII SQL as written', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     const [migration] = readMigrations(
       folderWith({
         '0001_a.sql': "CREATE TABLE t (v text); INSERT INTO t VALUES ('café, naïve, 東京');",
@@ -411,7 +412,7 @@ describe('migrate', () => {
   });
 
   it('keeps nothing of a migration that fails, and says which one', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     const [baseline] = real as [Migration];
     const failing: Migration = {
       name: '0002_failing',
@@ -439,7 +440,7 @@ describe('migrate', () => {
   });
 
   it('lets one runner at a time apply each migration', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     const slow: Migration = {
       name: '0003_slow',
       sha256: 'e'.repeat(64),
@@ -454,7 +455,7 @@ describe('migrate', () => {
 
 describe('the baseline’s grants', () => {
   it('let instante_app read and write rows, read the migrations record, and nothing else', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     await asOwner(db, (client) => migrate(client, real));
     await asApp(db, async (client) => {
       const id = '01a1d6d4-6c3f-70a4-8d32-3cec9c5a9747';
@@ -500,7 +501,7 @@ describe('the baseline’s grants', () => {
   });
 
   it('let instante_app use the sequences of tables the owner makes later', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     await asOwner(db, async (client) => {
       await migrate(client, real);
       // A plain sequence: an identity column's own sequence needs no rights of its own.
@@ -526,12 +527,14 @@ describe('createPool', () => {
         err: (line) => lines.push(JSON.parse(line) as Record<string, unknown>),
       },
     });
-    const pool = createPool(urlFor('instante_test', 'app'), { logger, max: 2 });
+    const db = await testDatabase();
+    const pool = createPool(urlFor(db, 'app'), { logger, max: 2 });
     try {
       const { rows } = await pool.query<{ role: string; app: string }>(
         "SELECT current_user AS role, current_setting('application_name') AS app",
       );
       expect(rows).toEqual([{ role: 'instante_app', app: 'instante' }]);
+      // Never connects: a pool opens no connection until it's used.
       expect(createPool(urlFor('instante_test', 'app'), { logger }).options.max).toBe(5);
       pool.emit(
         'error',
@@ -563,7 +566,7 @@ describe('cli db', () => {
   });
 
   it('status lists what is pending and exits 3; migrate applies it; status then exits 0', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     lines.length = 0;
     expect(await runCli(config(db, ['app']), ['db', 'status'], print)).toBe(3);
     expect(lines).toEqual(['pending  0001_baseline', 'pending  0002_skeleton']);
@@ -582,7 +585,7 @@ describe('cli db', () => {
   });
 
   it("prints a failing migration's database error sanitized, never its values", async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     const folder = folderWith({
       '0001_a.sql':
         "CREATE TABLE people (email text UNIQUE); INSERT INTO people VALUES ('jordan@example.com'), ('jordan@example.com');",
@@ -602,7 +605,7 @@ describe('cli db', () => {
   it('lets an error that is no refusal through, such as a missing folder or database', async () => {
     const missing = new URL('file:///nonexistent-instante-migrations/');
     await expect(
-      runCli(config('instante_test'), ['db', 'status'], print, { migrations: missing }),
+      runCli(config(await testDatabase()), ['db', 'status'], print, { migrations: missing }),
     ).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(
       runCli(config('instante_t_no_such_database'), ['db', 'status'], print),
@@ -616,14 +619,14 @@ describe('cli db', () => {
   });
 
   it('prints a refusal and exits 1', async () => {
-    const db = await scratchDatabase("ENCODING 'UTF8' LOCALE_PROVIDER libc LOCALE 'C'");
+    const db = await emptyDatabase("ENCODING 'UTF8' LOCALE_PROVIDER libc LOCALE 'C'");
     lines.length = 0;
     expect(await runCli(config(db), ['db', 'migrate'], print)).toBe(1);
     expect(lines.join('\n')).toMatch(/The migrations can't run:\n- the database uses UTF8, libc/);
   });
 
   it('runs through main.ts with ROLE=cli, as dev-db.sh and the launcher run it', async () => {
-    const db = await scratchDatabase();
+    const db = await emptyDatabase();
     const folder = mkdtempSync(path.join(tmpdir(), 'instante-cli-'));
     folders.push(folder);
     const file = path.join(folder, 'owner.url');
@@ -656,7 +659,7 @@ describe('cli db', () => {
       code: 0,
       out: 'Applied 0001_baseline\nApplied 0002_skeleton\n',
     });
-    const wrong = await scratchDatabase("ENCODING 'UTF8' LOCALE_PROVIDER libc LOCALE 'C'");
+    const wrong = await emptyDatabase("ENCODING 'UTF8' LOCALE_PROVIDER libc LOCALE 'C'");
     writeFileSync(file, `${urlFor(wrong, 'owner')}\n`, { mode: 0o600 });
     const refused = await run(['db', 'migrate']);
     expect(refused.code).toBe(1);

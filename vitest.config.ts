@@ -6,10 +6,13 @@ export default defineConfig({
     projects: [
       { test: { name: 'scripts', include: ['scripts/**/*.test.ts'] } },
       { test: { name: 'contract', include: ['packages/contract/src/**/*.test.ts'] } },
+      { test: { name: 'backend', include: ['apps/backend/src/**/*.test.ts'] } },
+      // On Postgres 18: one migrated template per run, copied by each file (test/db-harness.ts).
       {
         test: {
-          name: 'backend',
-          include: ['apps/backend/src/**/*.test.ts', 'apps/backend/test/**/*.test.ts'],
+          name: 'backend-integration',
+          include: ['apps/backend/test/**/*.test.ts'],
+          globalSetup: ['apps/backend/test/global-setup.ts'],
         },
       },
     ],
