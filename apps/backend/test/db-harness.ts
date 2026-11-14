@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { userInfo } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { inject } from 'vitest';
 
@@ -10,7 +11,7 @@ import { inject } from 'vitest';
 
 const OWNER_URL_FILE =
   process.env['INSTANTE_TEST_OWNER_URL_FILE'] ??
-  new URL('../../../.dev/secrets/owner-test.url', import.meta.url).pathname;
+  fileURLToPath(new URL('../../../.dev/secrets/owner-test.url', import.meta.url));
 
 export const PINNED = "ENCODING 'UTF8' LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8' LOCALE 'C'";
 
@@ -93,15 +94,16 @@ export async function dropDatabasesStartingWith(prefix: string): Promise<void> {
   for (const { datname } of rows) await dropDatabase(datname);
 }
 
-/** A plain DROP waits out an autovacuum worker, which instante_owner may not terminate; a
- * database still in use is retried for up to 5 seconds. */
+/** A plain DROP, not FORCE: instante_owner may not terminate an autovacuum worker, and a plain
+ * DROP waits for one. A database still in use (a just-closed client's backend still exiting) is
+ * retried 4 times, a quarter second apart, before its error is let through. */
 export async function dropDatabase(name: string): Promise<void> {
   for (let attempt = 1; ; attempt++) {
     try {
       await asOwner('instante_test', (client) => client.query(`DROP DATABASE IF EXISTS ${name}`));
       return;
     } catch (error) {
-      if ((error as { code?: string }).code !== '55006' || attempt === 20) throw error;
+      if ((error as { code?: string }).code !== '55006' || attempt === 4) throw error;
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
   }

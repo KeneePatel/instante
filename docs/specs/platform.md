@@ -161,7 +161,8 @@ That keeps "patched the day it lands" possible without loosening the setting.
   - `authenticate` is injected. Until `accounts` supplies the real one, it refuses every token;
   - `GET /healthz` (the process is up) and `GET /readyz` (the database answers, migrations and pg-boss's schema are current, the document service answers), both outside `/api`.
 - **`store`:**
-  - a `pg` pool for `instante_app`, and Drizzle over it;
+  - a `pg` pool for `instante_app`, and Drizzle over it. `schema.ts` mirrors the migrations (each column's name, type and `NOT NULL`, held by a test), and classifies every table once, as per person or shared, and the database's tables are held to that list;
+  - **the person-scoped store rule:** a per-person table has `user_id` `NOT NULL`, first in its primary key, and every use of it in `src/store/` (by any imported name, or its SQL name in a string) sits inside a function taking a `PersonId`: a branded type only authentication makes, exactly that type, neither optional nor defaulted. A test checks both, the code with the TypeScript checker. Whether each query also filters by that id is the isolation matrix's to show (`accounts`);
   - **the migration runner:** numbered `migrations/NNNN_name.sql` files and a `schema_migrations(name, sha256, applied_at)` table. It fails on a gap, an unknown applied name or a changed file, and has no mode that relaxes this; a rollback restores a dump instead ("The local stack"). It also fails if the database's encoding, locale provider or collation isn't the pinned `UTF8` and builtin `C.UTF-8`, if it isn't run as `instante_owner` owning the database (never a superuser), and on a file that isn't UTF-8 or runs its own transaction control or role change (the runner's one transaction per file is what makes a failed migration keep nothing);
   - `0001_baseline.sql`: the `schema_migrations` table and the app role's grants: rows read and written, the migrations record read only, nothing created, not even temporary objects. Database-level rights (no `TEMPORARY` or `CONNECT` for `PUBLIC`, `CONNECT` for `instante_app`) live with the database rather than its contents, so whatever makes a database grants them too: `dev-db.sh`, the test harness's copies, `setup` and `restore`;
   - `0002_skeleton.sql`: a `skeleton_ping` table, used by the queue check below.
@@ -434,7 +435,7 @@ export const ping: Handler<typeof routes.ping> = ({ clock }) => ({
 - Files in kebab-case, types and Zod schemas in PascalCase (`XxxSchema`), functions in camelCase.
 - No `any`, no non-null assertions, no enums or namespaces (they aren't erasable syntax); use `as const` unions.
 - Backend imports keep their `.ts` extension, since Node runs the source.
-- SQL lives only in `store`, and every store function takes the person's id when the table is per person.
+- SQL lives only in `store`, and every store function takes the person's id, as a `PersonId`, when the table is per person.
 - Errors are `AppError(code)`; nothing else reaches a reply.
 - Unit tests sit next to the code (`*.test.ts`); integration tests live in `apps/backend/test/`.
 - Shell scripts use `set -u` and `pipefail`, quote every expansion, run on bash 3.2, and pass ShellCheck.
