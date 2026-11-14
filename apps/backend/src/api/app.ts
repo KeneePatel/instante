@@ -3,6 +3,7 @@ import { Hono, type Context } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { AppError, errorReply } from '../kit/errors.ts';
 import { routeHandlers } from './handlers/ping.ts';
+import { registerReadyz, type Ready } from './handlers/readyz.ts';
 import { testRouteHandlers } from './handlers/test-routes.ts';
 import {
   dropCookie,
@@ -19,6 +20,8 @@ export type AppOptions = {
   /** The test-only table, registered only with INSTANTE_ENV=test. */
   testRoutes: boolean;
   authenticate: Authenticate;
+  /** The checks /readyz reports as failing, or none. */
+  ready: Ready;
   deps: Deps;
 };
 
@@ -28,6 +31,7 @@ export function createApp(options: AppOptions): Hono<AppEnv> {
   app.use('*', replyHeaders, requestContext(deps), hostCheck(options), fetchMetadata, dropCookie);
 
   app.get('/healthz', (c) => c.json({ ok: true }));
+  registerReadyz(app, options.ready);
   registerRoutes(app, routes, routeHandlers, { authenticate, deps });
   if (options.testRoutes) {
     registerRoutes(app, testRoutes, testRouteHandlers, { authenticate, deps });

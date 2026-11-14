@@ -25,6 +25,7 @@ export function testApp(
     testRoutes?: boolean;
     authenticate?: Authenticate;
     sleep?: (ms: number) => Promise<void>;
+    ready?: () => Promise<readonly string[]>;
   } = {},
 ): TestApp {
   const lines: Record<string, unknown>[] = [];
@@ -39,6 +40,7 @@ export function testApp(
     allowedHost: ALLOWED_HOST,
     testRoutes: options.testRoutes ?? true,
     authenticate: options.authenticate ?? refuseEveryToken,
+    ready: options.ready ?? (() => Promise.resolve([])),
     deps: {
       clock,
       ids: systemIds,

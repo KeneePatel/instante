@@ -7,6 +7,10 @@ import { systemClock, type Clock } from './kit/clock.ts';
 import { loadConfig, processRuntime, type Runtime } from './kit/config.ts';
 import { systemIds } from './kit/ids.ts';
 import { createLogger, type Sink } from './kit/logger.ts';
+import { readMigrations } from './store/migrate.ts';
+import { createPool } from './store/pool.ts';
+import { createBoss } from './store/queue.ts';
+import { failingChecks } from './store/readiness.ts';
 
 // What `src/main.ts` runs, kept apart so tests can start it in-process. It reads ROLE from
 // the configuration; ROLE=documents (T12) and ROLE=cli (T9) arrive with their tasks.
@@ -42,11 +46,28 @@ export async function start(options: StartOptions): Promise<Running> {
     throw new Error(`ROLE=${config.role} has nothing to run in this release`);
   }
 
+  // The database as instante_app, and the queue, which refuses to start on a pg-boss schema
+  // other than this release's (it never migrates: `cli db migrate` does).
+  const pool = createPool(config.databaseUrl, { logger });
+  const boss = createBoss(config.databaseUrl, { logger });
+  const migrations = readMigrations();
+  try {
+    await boss.start();
+  } catch (error) {
+    await pool.end();
+    throw error;
+  }
+  const closeData = async () => {
+    await boss.stop({ graceful: true, close: true });
+    await pool.end();
+  };
+
   const app = createApp({
     port: config.listen.port,
     allowedHost: config.allowedHost,
     testRoutes: config.testRoutes,
     authenticate: options.authenticate ?? refuseEveryToken,
+    ready: () => failingChecks(pool, boss, migrations),
     deps: {
       clock,
       ids: systemIds,
@@ -63,6 +84,9 @@ export async function start(options: StartOptions): Promise<Running> {
       },
     );
     listening.once('error', reject);
+  }).catch(async (error: unknown) => {
+    await closeData();
+    throw error;
   });
   if (!(server instanceof Server)) throw new Error('start: expected an HTTP/1.1 server');
   const { port } = server.address() as AddressInfo;
@@ -99,7 +123,7 @@ export async function start(options: StartOptions): Promise<Running> {
           else reject(error);
         });
         server.closeIdleConnections();
-      });
+      }).finally(closeData);
     },
   };
 }

@@ -149,19 +149,19 @@
   - **Verify:** `pnpm --filter @instante/backend test -- store`.
   - **Depends on:** T9. **Files:** `test/{global-setup,db-harness,store-scoping}.ts`, `src/store/{db,schema,person,skeleton}.ts`, `test/store.test.ts`, plus edits to `vitest.config.ts` and `test/migrate.test.ts`. **Size:** S.
 
-- [ ] **T11: The queue pattern**
+- [x] **T11: The queue pattern**
   - **Does:**
     - `cli db migrate` steps 2 to 4: `pg-boss migrate` with the URL in `PGBOSS_DATABASE_URL`, the grants, and the queues as the owner;
     - pg-boss started with `migrate: false` and `persistQueueStats: false`;
-    - `/readyz` checking the database, our migrations and pg-boss's schema version;
+    - `/readyz` checking the database, our migrations and pg-boss's schema version (the document service's check comes with T12);
     - `skeleton_ping` with `send` and `complete` through `fromDrizzle`.
   - **Acceptance:** a committed transaction writes the row and completes the job, and a rolled-back one leaves neither (platform spec 5); `/readyz` fails on a pg-boss schema mismatch.
   - **Verify:** `pnpm --filter @instante/backend test -- queue`.
-  - **Depends on:** T8, T10. **Files:** `src/cli/db.ts`, `src/store/queue.ts`, `src/api/handlers/readyz.ts`, `test/queue.test.ts`. **Size:** M.
+  - **Depends on:** T8, T10. **Files:** `src/cli/db.ts`, `src/store/{queue,readiness}.ts`, `src/api/handlers/readyz.ts`, `test/queue.test.ts`, plus edits to `src/start.ts` (the pool and pg-boss started at start) and the test harness (the template gets all of `cli db migrate`). **Size:** M.
 
 ### Checkpoint 2
-- [ ] `check:task` green; integration tests on Postgres 18 with the pinned locale, locally and in CI.
-- [ ] Review session: the contract helper (T5), the request checks (T8), the runner (T9), store scoping (T10).
+- [x] `check:task` green; integration tests on Postgres 18 with the pinned locale, locally and in CI.
+- [x] Review session: the contract helper (T5), the request checks (T8), the runner (T9), store scoping (T10).
 
 ## Phase C: Document service, web and CI
 

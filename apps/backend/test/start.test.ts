@@ -5,19 +5,27 @@ import { connect, createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
+import { beforeAll } from 'vitest';
 import { PINNED_NODE } from '../src/kit/config.ts';
 import { manualClock } from '../src/kit/clock.ts';
 import type { Sink } from '../src/kit/logger.ts';
 import { start, type Running } from '../src/start.ts';
+import { dropTestDatabases, testDatabase, urlFor } from './db-harness.ts';
 
 // The backend started for real, on loopback: requests over a socket carry their own Host
 // header, unlike app.request.
 
 const folder = mkdtempSync(path.join(tmpdir(), 'instante-start-'));
 const secret = path.join(folder, 'app-url');
-writeFileSync(secret, 'postgresql://instante_app@localhost:5432/instante_test\n', { mode: 0o600 });
-afterAll(() => {
+// The backend now starts its pool and pg-boss, so it gets a real database: a harness copy.
+let appUrl = '';
+beforeAll(async () => {
+  appUrl = urlFor(await testDatabase(), 'app');
+  writeFileSync(secret, `${appUrl}\n`, { mode: 0o600 });
+});
+afterAll(async () => {
   rmSync(folder, { recursive: true, force: true });
+  await dropTestDatabases();
 });
 
 async function freePort(): Promise<number> {
@@ -78,7 +86,7 @@ describe('start', () => {
         nodeVersion: PINNED_NODE,
         execArgv: [],
         homeDir: '/Users/nobody',
-        readFile: (f) => (f === secret ? 'postgresql://x@localhost/y' : ''),
+        readFile: (f) => (f === secret ? appUrl : ''),
       },
       clock: manualClock('2026-11-13T16:00:00Z'),
       sink,
@@ -120,7 +128,7 @@ describe('start', () => {
     nodeVersion: PINNED_NODE,
     execArgv: [],
     homeDir: '/Users/nobody',
-    readFile: () => 'postgresql://x@localhost/y',
+    readFile: () => appUrl,
   };
   const quiet: Sink = { out: () => {}, err: () => {} };
   const acceptGood = (authorization: string | undefined) =>

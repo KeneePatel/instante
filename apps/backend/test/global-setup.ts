@@ -1,11 +1,13 @@
 import type { TestProject } from 'vitest/node';
 import { migrate, readMigrations } from '../src/store/migrate.ts';
+import { migrateQueue } from '../src/store/queue.ts';
 import {
   PINNED,
   asOwner,
   dropDatabase,
   dropDatabasesStartingWith,
   templateName,
+  urlFor,
 } from './db-harness.ts';
 
 // Once per test run: one migrated template database, which each integration test file copies
@@ -29,7 +31,9 @@ export async function setup(project: TestProject): Promise<() => Promise<void>> 
     await asOwner('instante_test', (client) =>
       client.query(`CREATE DATABASE ${template} OWNER instante_owner TEMPLATE template0 ${PINNED}`),
     );
+    // All of `cli db migrate`: ours, then pg-boss's, its grants and the queues.
     await asOwner(template, (client) => migrate(client, readMigrations()));
+    await migrateQueue(urlFor(template, 'owner'), () => undefined);
   } catch (error) {
     await teardown().catch(() => undefined);
     throw new Error(

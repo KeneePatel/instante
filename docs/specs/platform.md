@@ -159,7 +159,7 @@ That keeps "patched the day it lands" possible without loosening the setting.
   - a caller that leaves mid-request is logged as `request.aborted`, not as a failure;
   - **on stop** (`SIGTERM` or `SIGINT`): no new connections, every reply still to be sent carries `Connection: close`, and whatever is left is closed after 10 seconds, under the rewrite's 30;
   - `authenticate` is injected. Until `accounts` supplies the real one, it refuses every token;
-  - `GET /healthz` (the process is up) and `GET /readyz` (the database answers, migrations and pg-boss's schema are current, the document service answers), both outside `/api`.
+  - `GET /healthz` (the process is up) and `GET /readyz` (the database answers, migrations and pg-boss's schema are current, the document service answers), both outside `/api`. `/readyz` answers `{ ok, failed }`, with `503` naming the checks that fail; the backend starts its pool and pg-boss at start, so a database it can't use, or a pg-boss schema other than this release's, stops it from starting at all;
 - **`store`:**
   - a `pg` pool for `instante_app`, and Drizzle over it. `schema.ts` mirrors the migrations (each column's name, type and `NOT NULL`, held by a test), and classifies every table once, as per person or shared, and the database's tables are held to that list;
   - **the person-scoped store rule:** a per-person table has `user_id` `NOT NULL`, first in its primary key, and every use of it in `src/store/` (by any imported name, or its SQL name in a string) sits inside a function taking a `PersonId`: a branded type only authentication makes, exactly that type, neither optional nor defaulted. A test checks both, the code with the TypeScript checker. Whether each query also filters by that id is the isolation matrix's to show (`accounts`);
@@ -196,7 +196,7 @@ That keeps "patched the day it lands" possible without loosening the setting.
       - the service lists the child's open files with `lsof -p` and fails on any regular file, socket or lock file beyond its own pipes and Node's internal descriptors.
 
       The backend runs the same TCP and `localhost` lookup probes as a positive control, and they must succeed there. Every probe stays on this machine.
-- **`cli`** (`ROLE=cli`, through `src/main.ts`): `db migrate`, as `instante_owner`, and `db status`, as either role. Exit codes: 0 done, 1 refused, 3 not current (`db status` with anything pending), 64 usage, 78 configuration. Later modules add their owner commands here.
+- **`cli`** (`ROLE=cli`, through `src/main.ts`): `db migrate`, as `instante_owner` (all four steps below), and `db status`, as either role. Our migrations are reported on stdout, pg-boss's output on stderr. Exit codes: 0 done, 1 refused, 3 not current (`db status` with a migration pending, or pg-boss's schema not this release's), 64 usage, 78 configuration. Later modules add their owner commands here.
 
 Every Instante process, the web server included, starts with `--disable-sigusr1` on its own command line, not through `NODE_OPTIONS`.
 
