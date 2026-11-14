@@ -326,7 +326,7 @@ The subcommands:
   - `scripts/local/`, above, with its tests and the GitHub stub.
 - **`.github/workflows/ci.yml`,** on pushes and pull requests. It holds no secrets, because nothing deploys from CI. Its jobs, mostly in parallel:
   - format, lint and types;
-  - unit and integration tests on a `postgres:18` service, started with `POSTGRES_INITDB_ARGS` for the pinned locale, with coverage of changed lines;
+  - unit and integration tests on a `postgres:18` service, started with `POSTGRES_INITDB_ARGS` for the pinned locale and set to Postgres's non-durable settings (`fsync`, `full_page_writes` and `synchronous_commit` off), since every `DROP DATABASE` forces a checkpoint and the runner's disk made those slow enough to time tests out; with coverage of changed lines;
   - the floor guard, and the check on committed `.claude/` settings;
   - gitleaks over git;
   - osv-scanner, Semgrep and ShellCheck;
