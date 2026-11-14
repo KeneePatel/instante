@@ -210,6 +210,11 @@
     - the input cap is 50 MB (50,000,000 bytes), as the spec writes it, not 50 MiB;
     - a socket folder someone else owns is refused for its owner, not its mode;
     - tests for what the mutants showed unpinned: the granted code's paths and what a child can read with them, stopping killing children (and a stop that came first), the output cap at its boundary and its reply, stderr's cap, the defaults that run (30, 25 and 5 seconds) and the deadlines cleared, the streams being the service's own pipes with stdin ended, the input file's `0600`, the socket's `0600` and every folder mode, the 404 for other routes, a job that can't start, the log lines' fields, readiness's length and status checks, and `/readyz` naming its own failures and the document service's together.
+  - **Second review (fixed):**
+    - children also start with `--freeze-flags-after-init`: through `v8.setFlagsFromString`, a child could turn on V8's traces, which V8 writes itself, to a file the child names, without the permission model's checks. With the flags frozen, V8 stops the child at the first change; a test tries it and finds the folder empty;
+    - the platform spec's web app command, which T19 and T22 build, gets both flags: under it, `node:sqlite` could read and write database files outside the release. `next start` serves with both (only `next build`'s memory-debugging mode changes a V8 flag);
+    - a failing stop test leaves no child running: the stop tests give their children a deadline under the test's own and close the service in `finally`, and `forever.ts` ends itself once orphaned. Their `ps` polling no longer blocks the event loop the service under test shares;
+    - the spec's order for stopping: the socket goes when it's closed, before the jobs' folders.
   - **Carried forward:**
     - T13: pnpm links the workspace packages into `node_modules/.pnpm/node_modules/@instante/`, pointing at `apps/web` and `apps/backend`, so a child can read those through the granted code. The start-up walk rightly refuses them; `hoistWorkspacePackages: false` in `pnpm-workspace.yaml` removes them (tried by the review: the lockfile is unchanged and every check passes).
     - T22: the 30-second kill is a timer in the service, so a child outlives a service killed outright. `stop`, and the launcher when a process exits, signal the process group, which the children share.
@@ -285,7 +290,7 @@
     - Playwright's config, whose `webServer` starts the production build the way `instante start` will:
       - ports `4320` and `4321`, with `ALLOWED_HOST=localhost:4320`;
       - absolute Node and `--disable-sigusr1`;
-      - the web app under `--permission`, reading only the checkout it runs from, as `instante start` grants the release folder;
+      - the web app under `--permission`, with `--no-experimental-sqlite` and `--freeze-flags-after-init`, reading only the checkout it runs from, as `instante start` grants the release folder;
       - readiness on the backend's `/readyz`;
     - the tests:
       - the ping page and a PDF through a `Blob`;
@@ -361,7 +366,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
     - in production, the `instante.localhost` resolution check;
     - the migrations and pg-boss checks;
     - the daily dumps, at start and from the poll loop, keeping the newest 3 and those before the last 3 releases (from `releases.log`);
-    - each process from `current` with `env -i`, absolute Node and `--disable-sigusr1`, the web app under `--permission`;
+    - each process from `current` with `env -i`, absolute Node and `--disable-sigusr1`, the web app under `--permission` with the platform spec's command (`--no-experimental-sqlite` and `--freeze-flags-after-init` included);
     - logs opened in append mode, copied and truncated past 20 MB by the poll loop, the last 10 starts kept;
     - the `lsof` loopback check;
     - the traps and the poll loop;

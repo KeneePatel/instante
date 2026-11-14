@@ -9,7 +9,7 @@ import {
 import { echo } from './tasks/echo.ts';
 
 describe('childArgs', () => {
-  it('gives the permission model, no SIGUSR1, a 256 MB heap, no sqlite and read grants only, then the script', () => {
+  it('gives the permission model, no SIGUSR1, a 256 MB heap, no sqlite, frozen V8 flags and read grants only, then the script', () => {
     expect(
       childArgs({
         script: '/code/src/documents/tasks/echo.ts',
@@ -22,6 +22,7 @@ describe('childArgs', () => {
       '--disable-sigusr1',
       '--max-old-space-size=256',
       '--no-experimental-sqlite',
+      '--freeze-flags-after-init',
       '--allow-fs-read=/jobs/instante-job-1',
       '--allow-fs-read=/code/src',
       '--allow-fs-read=/code/node_modules/.pnpm',

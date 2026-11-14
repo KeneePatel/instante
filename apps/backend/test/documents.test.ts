@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { getEventListeners, once } from 'node:events';
 import {
   chmodSync,
@@ -17,6 +17,7 @@ import { createServer as createNetServer, type Server as NetServer, type Socket 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CHILD_TIMEOUT_MS, MAX_CHILD_OUTPUT_BYTES, runChild } from '../src/documents/run-child.ts';
 import {
@@ -69,9 +70,11 @@ function recording(): { sink: Sink; lines: Record<string, unknown>[] } {
   return { sink: { out: keep, err: keep }, lines };
 }
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-/** The ids of this process's own children running `script`. */
-function childrenRunning(script: string): number[] {
-  return execFileSync('ps', ['-A', '-ww', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' })
+/** The ids of this process's own children running `script`. `ps` runs beside the event loop, which
+ * the service under test shares. */
+async function childrenRunning(script: string): Promise<number[]> {
+  const { stdout } = await promisify(execFile)('ps', ['-A', '-ww', '-o', 'pid=,ppid=,command=']);
+  return stdout
     .split('\n')
     .map((row) => row.trim().split(/\s+/))
     .filter(
@@ -113,6 +116,7 @@ describe('runChild', () => {
         '--disable-sigusr1',
         '--max-old-space-size=256',
         '--no-experimental-sqlite',
+        '--freeze-flags-after-init',
         `--allow-fs-read=${jobFolder}`,
         `--allow-fs-read=${children}`,
       ],
@@ -178,6 +182,15 @@ describe('runChild', () => {
     expect(readdirSync(jobFolder)).toEqual([]);
   });
 
+  it('lets a child write nothing through V8’s own flags either: they’re frozen once it starts', async () => {
+    const { jobFolder, result } = run('v8-flags');
+    const done = await result;
+    // V8 stops the process at the first flag it's asked to change.
+    expect(done).toMatchObject({ ok: false, reason: 'failed', code: null });
+    expect(done.stderr).toContain('IsFrozen');
+    expect(readdirSync(jobFolder)).toEqual([]);
+  });
+
   it('reports a child that fails, with its stderr', async () => {
     const done = await run('broken').result;
     expect(done).toMatchObject({
@@ -197,6 +210,8 @@ describe('runChild', () => {
       args: [],
       jobFolder,
       grants: [children],
+      // Below the test's own timeout, so a stop that fails still ends the child.
+      timeoutMs: 4000,
       signal: stopping.signal,
     });
     setTimeout(() => {
@@ -212,7 +227,7 @@ describe('runChild', () => {
       args: [],
       jobFolder: privateFolder(),
       grants: [children],
-      timeoutMs: 5000,
+      timeoutMs: 4000,
       signal: AbortSignal.abort(),
     });
     expect(done).toMatchObject({ ok: false, reason: 'stopped', signal: 'SIGKILL' });
@@ -549,24 +564,30 @@ describe('starting and stopping the document service', () => {
         tasks: { forever: json('forever') },
         grants: [...grantedCode(), children],
         jobsRoot,
+        // Below the test's own timeout, so a stop that fails still ends the child.
+        timeoutMs: 4000,
       },
     });
-    const running = createDocumentsClient(socket)
-      .run('forever', new Uint8Array([1]))
-      .catch((error: unknown) => error);
-    const script = child('forever');
-    for (let i = 0; i < 100 && childrenRunning(script).length === 0; i++) await sleep(50);
-    expect(childrenRunning(script)).toHaveLength(1);
-    expect(readdirSync(jobsRoot)).toHaveLength(1);
-    const began = Date.now();
-    await service.close();
-    expect(Date.now() - began).toBeLessThan(2000);
-    expect(childrenRunning(script)).toEqual([]);
-    expect(readdirSync(jobsRoot)).toEqual([]);
-    expect(lines).toContainEqual(
-      expect.objectContaining({ event: 'documents.failed', task: 'forever', reason: 'stopped' }),
-    );
-    expect(await running).toMatchObject({ name: 'DocumentsError', reason: 'unavailable' });
+    try {
+      const running = createDocumentsClient(socket)
+        .run('forever', new Uint8Array([1]))
+        .catch((error: unknown) => error);
+      const script = child('forever');
+      for (let i = 0; i < 40 && (await childrenRunning(script)).length === 0; i++) await sleep(50);
+      expect(await childrenRunning(script)).toHaveLength(1);
+      expect(readdirSync(jobsRoot)).toHaveLength(1);
+      const began = Date.now();
+      await service.close();
+      expect(Date.now() - began).toBeLessThan(2000);
+      expect(await childrenRunning(script)).toEqual([]);
+      expect(readdirSync(jobsRoot)).toEqual([]);
+      expect(lines).toContainEqual(
+        expect.objectContaining({ event: 'documents.failed', task: 'forever', reason: 'stopped' }),
+      );
+      expect(await running).toMatchObject({ name: 'DocumentsError', reason: 'unavailable' });
+    } finally {
+      await service.close();
+    }
   });
 
   it('answers 500 too_much_output for a result past 64 MiB', async () => {

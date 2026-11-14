@@ -5,7 +5,8 @@ import { spawn } from 'node:child_process';
 // - Node's permission model, reading only the job's folder and the granted code, with no
 //   writes, child processes, workers, addons or network (all denied unless allowed);
 // - --disable-sigusr1, so nothing can open its inspector, and a 256 MB heap;
-// - no node:sqlite, which writes files the permission model doesn't check;
+// - no node:sqlite, and V8's flags frozen once it starts: both write files the permission model
+//   doesn't check (node:sqlite its databases; V8 its traces, through v8.setFlagsFromString);
 // - an empty environment, so no NODE_OPTIONS and nothing of the service's own;
 // - three pipes and nothing else: no IPC channel, no other file descriptor;
 // - 30 seconds, then a kill.
@@ -53,6 +54,7 @@ export function childArgs(run: Pick<ChildRun, 'script' | 'args' | 'jobFolder' | 
     '--disable-sigusr1',
     `--max-old-space-size=${String(CHILD_HEAP_MB)}`,
     '--no-experimental-sqlite',
+    '--freeze-flags-after-init',
     ...[run.jobFolder, ...run.grants].map((path) => `--allow-fs-read=${path}`),
     run.script,
     ...run.args,
@@ -116,8 +118,8 @@ export function runChild(run: ChildRun): Promise<ChildResult> {
     child.once('close', (code, signal) => {
       settle();
       const ms = Math.round(performance.now() - began);
-      // Decoded once, so a character split between chunks survives; `stream` drops the last
-      // character when the cap cut it in two.
+      // Decoded once, so a character split between chunks survives; `stream` drops an unfinished
+      // last character, as when the cap cuts one in two.
       const stderr = new TextDecoder().decode(Buffer.concat(err), { stream: true });
       if (stopped === undefined && code === 0) {
         resolve({ ok: true, stdout: Buffer.concat(out), stderr, ms });
