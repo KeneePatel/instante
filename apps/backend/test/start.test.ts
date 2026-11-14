@@ -9,6 +9,7 @@ import { beforeAll } from 'vitest';
 import { PINNED_NODE } from '../src/kit/config.ts';
 import { manualClock } from '../src/kit/clock.ts';
 import type { Sink } from '../src/kit/logger.ts';
+import { startDocuments, type RunningDocuments } from '../src/documents/server.ts';
 import { start, type Running } from '../src/start.ts';
 import {
   asOwner,
@@ -24,13 +25,30 @@ import {
 
 const folder = mkdtempSync(path.join(tmpdir(), 'instante-start-'));
 const secret = path.join(folder, 'app-url');
-// The backend now starts its pool and pg-boss, so it gets a real database: a harness copy.
+// The backend now starts its pool and pg-boss, so it gets a real database: a harness copy. Its
+// /readyz asks the document service too, so one runs on the backend's DOCUMENTS_SOCKET.
 let appUrl = '';
+let documents: RunningDocuments;
 beforeAll(async () => {
   appUrl = urlFor(await testDatabase(), 'app');
   writeFileSync(secret, `${appUrl}\n`, { mode: 0o600 });
+  documents = await startDocuments({
+    env: {
+      INSTANTE_ENV: 'test',
+      ROLE: 'documents',
+      DOCUMENTS_SOCKET: path.join(folder, 'documents.sock'),
+    },
+    runtime: {
+      nodeVersion: PINNED_NODE,
+      execArgv: [],
+      homeDir: '/Users/nobody',
+      readFile: () => '',
+    },
+    sink: { out: () => {}, err: () => {} },
+  });
 });
 afterAll(async () => {
+  await documents.close();
   rmSync(folder, { recursive: true, force: true });
   await dropTestDatabases();
 });
@@ -347,7 +365,23 @@ describe('start', () => {
     expect(await openSessions(database, ['instante', 'instante-queue'], 2000)).toBe(0);
   });
 
-  it('refuses a role this release has nothing to run for', async () => {
+  it('names the document service in /readyz when it doesn’t answer', async () => {
+    const port = await freePort();
+    const server = await start({
+      env: { ...envFor(port), DOCUMENTS_SOCKET: path.join(folder, 'nobody-here.sock') },
+      runtime,
+      sink: quiet,
+    });
+    try {
+      const reply = await get(port, '/readyz', { host: `127.0.0.1:${String(port)}` });
+      expect(reply.status).toBe(503);
+      expect(JSON.parse(reply.body)).toEqual({ ok: false, failed: ['documents'] });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('refuses a role main.ts starts some other way', async () => {
     const env = { INSTANTE_ENV: 'test', ROLE: 'documents', DOCUMENTS_SOCKET: '/tmp/d.sock' };
     await expect(start({ env })).rejects.toThrow(/ROLE=documents has nothing to run/);
   });

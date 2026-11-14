@@ -183,7 +183,7 @@
 
 ## Phase C: Document service, web and CI
 
-- [ ] **T12: The document service** (**review:** the children's flags, environment and streams)
+- [x] **T12: The document service** (**review:** the children's flags, environment and streams)
   - **Does:**
     - `ROLE=documents`: Hono on `DOCUMENTS_SOCKET`, with no TCP port, started with only its allowed names;
     - `POST /run/:task`;
@@ -198,12 +198,16 @@
   - **Acceptance:** `echo` returns the input's length and SHA-256 through the client; a child past 30 seconds is killed; `/readyz` fails with the socket down.
   - **Verify:** `pnpm --filter @instante/backend test -- documents`.
   - **Depends on:** T11. **Files:** `src/documents/{server,run-child,tasks/echo}.ts`, `src/kit/documents-client.ts`, `test/documents.test.ts`, plus an edit to `src/api/handlers/readyz.ts`. **Size:** M.
+  - **As built:**
+    - `/readyz` needed no change to its handler: `start.ts` adds `documents` beside `failingChecks`, checked by `echo` on an empty input;
+    - the decisions the spec didn't name (the socket's folder, a stale socket, the input, result and reply caps, the error codes) are now in the platform spec's `documents` section;
+    - on macOS, a child's environment holds `__CF_USER_TEXT_ENCODING`, which CoreFoundation sets inside every process; the spawn passes none. T13's `selftest` allows exactly that name on macOS.
 
 - [ ] **T13: The document service's isolation checks** (**review**)
   - **Does:**
     - the start-up walk refusing symlinks that point outside the granted code;
     - the job-folder check, refusing symlinks, hard links and non-regular files;
-    - `selftest` in the service and in a child, the `lsof -p` check of the child's files, and the backend's positive control (a TCP connection to its own port, and a `localhost` lookup);
+    - `selftest` in the service and in a child (on macOS, allowing only `__CF_USER_TEXT_ENCODING`, which CoreFoundation sets in every process), the `lsof -p` check of the child's files, and the backend's positive control (a TCP connection to its own port, and a `localhost` lookup);
     - the ESLint ban on `exec`, shell `execFile` and `fork` in `src/documents/`.
   - **Acceptance:** each probe gives the expected answer; a planted symlink is refused; the positive control succeeds (the Linux half of platform spec 13).
   - **Verify:** `pnpm --filter @instante/backend test -- selftest`.

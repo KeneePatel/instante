@@ -141,7 +141,7 @@ That keeps "patched the day it lands" possible without loosening the setting.
   - **a JSON logger** on `console` with one sanitizer: database errors keep only code, constraint and table (an error wrapping one keeps its own name and stack, not its message), and `Authorization` and `Cookie` headers are redacted. So are other credentials: tokens, keys, passwords and secrets by field name (in objects, `Headers` and name/value lists such as `rawHeaders`), and bearer tokens, Supabase session cookies and a URL's password inside any string. Bytes keep only their size, and the sanitizer never throws;
   - **`AppError`** with a contract error code;
   - **the clock and ids;**
-  - **the document-service client,** over `node:http` to `DOCUMENTS_SOCKET`, with a total 25-second deadline, under the rewrite's 30.
+  - **the document-service client,** over `node:http` to `DOCUMENTS_SOCKET`, with a total 25-second deadline, under the rewrite's 30, and replies capped at 64 MiB, the service's own cap on a result, since the service is treated as compromised. Readiness runs `echo` on an empty input and checks its hash exactly, within 5 seconds, so it proves the whole path to a child, not just the socket.
 - **`api`:**
   - a Hono app built from the contract by `registerRoutes(app, table, handlers, { authenticate, deps })`. A route without an `auth` value or a handler, or a handler without a route, fails to register, and then nothing in that table registers;
   - **before any route,** in this order:
@@ -180,8 +180,11 @@ That keeps "patched the day it lands" possible without loosening the setting.
 
   A rollback leaves neither the row nor the job's completion, and a late attempt writes nothing.
 - **`documents`** (`ROLE=documents`): a Hono app on the Unix socket `DOCUMENTS_SOCKET`, with no TCP port and one route, `POST /run/:task`. It's started with only its own environment names, and no secret or database URL.
+  - **Its socket:** the socket's folder must be the owner's, mode `0700`, or it refuses to start; the socket itself is `0600`. A socket file nothing answers on (left by a process that died) is replaced; a socket something answers on, or a file that isn't a socket, refuses. Stopping kills the children still running and removes the socket.
   - **At start,** it walks the code it will grant to its children (the backend source, `packages/contract` and `node_modules/.pnpm`, by real path) and refuses to run if any symlink there points outside them.
-  - **Each job** gets a folder from `fs.mkdtemp`. The service writes the input bytes itself, never unpacks an archive to disk, and refuses anything in the folder that isn't a regular file with one link.
+  - **Each job** gets a folder from `fs.mkdtemp`, under the real path of the system's temporary folder (the grant must name the path the child sees), removed after the job. The service writes the input bytes itself, as `input` (`0600`), never unpacks an archive to disk, and refuses anything in the folder that isn't a regular file with one link. Every task reads `input` from its working folder, the job's, and writes its result on stdout.
+  - **Limits:** an input of at most 50 MB, the largest documented one (a board's answer; each task checks its own, smaller cap); a result of at most 64 MiB, past which the child is killed; and 64 KiB of the child's stderr kept for the log, which stays on this Mac since it may quote the document.
+  - **Replies:** the child's result with the task's media type, or `{ error: { code } }`: `404 unknown_task`, `413 too_large`, `500 failed` or `too_much_output`, and `504 timed_out`.
   - **Each task runs in a child process,** started with `child_process.spawn(process.execPath, [...])`, never through a shell or `fork`:
     - `--permission`, `--disable-sigusr1`, `--max-old-space-size=256`, and `--allow-fs-read` for the job's folder and the granted code's real paths only;
     - no writes, child processes, workers or network;
