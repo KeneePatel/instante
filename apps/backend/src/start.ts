@@ -5,6 +5,7 @@ import { createApp } from './api/app.ts';
 import { refuseEveryToken, type Authenticate } from './api/register-routes.ts';
 import { systemClock, type Clock } from './kit/clock.ts';
 import { loadConfig, processRuntime, type Runtime } from './kit/config.ts';
+import { createDocumentsClient } from './kit/documents-client.ts';
 import { systemIds } from './kit/ids.ts';
 import { createLogger, type Sink } from './kit/logger.ts';
 import { readMigrations } from './store/migrate.ts';
@@ -12,8 +13,8 @@ import { createPool } from './store/pool.ts';
 import { createBoss } from './store/queue.ts';
 import { failingChecks } from './store/readiness.ts';
 
-// What `src/main.ts` runs, kept apart so tests can start it in-process. It reads ROLE from
-// the configuration; ROLE=documents (T12) and ROLE=cli (T9) arrive with their tasks.
+// The backend (ROLE=all), as `src/main.ts` runs it, kept apart so tests can start it in-process.
+// main.ts starts the document service (ROLE=documents) and the cli (ROLE=cli) itself.
 
 export type Running = {
   port: number;
@@ -43,7 +44,7 @@ export async function start(options: StartOptions): Promise<Running> {
     ...(options.sink === undefined ? {} : { sink: options.sink }),
   });
   if (config.role !== 'all') {
-    throw new Error(`ROLE=${config.role} has nothing to run in this release`);
+    throw new Error(`ROLE=${config.role} has nothing to run here: main.ts starts it itself`);
   }
 
   // The database as instante_app, and the queue, which refuses to start on a pg-boss schema
@@ -51,6 +52,7 @@ export async function start(options: StartOptions): Promise<Running> {
   const pool = createPool(config.databaseUrl, { logger });
   const boss = createBoss(config.databaseUrl, { logger });
   const migrations = readMigrations();
+  const documents = createDocumentsClient(config.documentsSocket);
   try {
     await boss.start();
   } catch (error) {
@@ -72,7 +74,13 @@ export async function start(options: StartOptions): Promise<Running> {
     allowedHost: config.allowedHost,
     testRoutes: config.testRoutes,
     authenticate: options.authenticate ?? refuseEveryToken,
-    ready: () => failingChecks(pool, boss, migrations),
+    ready: async () => {
+      const [data, documentsAnswer] = await Promise.all([
+        failingChecks(pool, boss, migrations),
+        documents.answers(),
+      ]);
+      return documentsAnswer ? data : [...data, 'documents'];
+    },
     deps: {
       clock,
       ids: systemIds,

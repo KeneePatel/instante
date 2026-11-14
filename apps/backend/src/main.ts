@@ -2,12 +2,13 @@ import { runCli } from './cli/db.ts';
 import { systemClock } from './kit/clock.ts';
 import { ConfigError, loadConfig, processRuntime } from './kit/config.ts';
 import { createLogger } from './kit/logger.ts';
+import { startDocuments } from './documents/server.ts';
 import { start } from './start.ts';
 
 // The backend's entry point: `node --disable-sigusr1 apps/backend/src/main.ts`, with ROLE and
 // the rest of the configuration in the environment (docs/specs/platform.md). ROLE=cli runs
-// the command in its arguments; any other role starts the server, which loads and checks the
-// configuration itself (ROLE=documents arrives with T12).
+// the command in its arguments, ROLE=documents starts the document service, and any other role
+// starts the backend; each loads and checks the configuration itself.
 
 try {
   if (process.env['ROLE'] === 'cli') {
@@ -18,7 +19,10 @@ try {
     });
   } else {
     // The stop handlers come before the server listens, so a stop sent as it starts isn't lost.
-    const running = start({ env: process.env });
+    const running =
+      process.env['ROLE'] === 'documents'
+        ? startDocuments({ env: process.env })
+        : start({ env: process.env });
     for (const signal of ['SIGTERM', 'SIGINT'] as const) {
       process.once(signal, () => {
         void running

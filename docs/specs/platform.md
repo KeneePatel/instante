@@ -141,7 +141,7 @@ That keeps "patched the day it lands" possible without loosening the setting.
   - **a JSON logger** on `console` with one sanitizer: database errors keep only code, constraint and table (an error wrapping one keeps its own name and stack, not its message), and `Authorization` and `Cookie` headers are redacted. So are other credentials: tokens, keys, passwords and secrets by field name (in objects, `Headers` and name/value lists such as `rawHeaders`), and bearer tokens, Supabase session cookies and a URL's password inside any string. Bytes keep only their size, and the sanitizer never throws;
   - **`AppError`** with a contract error code;
   - **the clock and ids;**
-  - **the document-service client,** over `node:http` to `DOCUMENTS_SOCKET`, with a total 25-second deadline, under the rewrite's 30.
+  - **the document-service client,** over `node:http` to `DOCUMENTS_SOCKET`, with a total 25-second deadline, under the rewrite's 30, and replies capped at 64 MiB, the service's own cap on a result, since the service is treated as compromised. Readiness runs `echo` on an empty input and checks its hash exactly, within 5 seconds, so it proves the whole path to a child, not just the socket.
 - **`api`:**
   - a Hono app built from the contract by `registerRoutes(app, table, handlers, { authenticate, deps })`. A route without an `auth` value or a handler, or a handler without a route, fails to register, and then nothing in that table registers;
   - **before any route,** in this order:
@@ -180,10 +180,13 @@ That keeps "patched the day it lands" possible without loosening the setting.
 
   A rollback leaves neither the row nor the job's completion, and a late attempt writes nothing.
 - **`documents`** (`ROLE=documents`): a Hono app on the Unix socket `DOCUMENTS_SOCKET`, with no TCP port and one route, `POST /run/:task`. It's started with only its own environment names, and no secret or database URL.
+  - **Its socket:** the socket's folder must be the owner's, mode `0700`, or it refuses to start; the socket itself is `0600`. A socket file nothing answers on (left by a process that died) is replaced; a socket something answers on, or anything else at the path (a symlink included, checked before binding, since macOS's `bind()` follows one that points nowhere), refuses. Stopping kills the children still running and closes the socket, which removes it, then waits for their jobs' folders to be removed.
   - **At start,** it walks the code it will grant to its children (the backend source, `packages/contract` and `node_modules/.pnpm`, by real path) and refuses to run if any symlink there points outside them.
-  - **Each job** gets a folder from `fs.mkdtemp`. The service writes the input bytes itself, never unpacks an archive to disk, and refuses anything in the folder that isn't a regular file with one link.
+  - **Each job** gets a folder from `fs.mkdtemp`, under the real path of the system's temporary folder (the grant must name the path the child sees), removed after the job. The service writes the input bytes itself, as `input` (`0600`), never unpacks an archive to disk, and refuses anything in the folder that isn't a regular file with one link. Every task reads `input` from its working folder, the job's, and writes its result on stdout.
+  - **Limits:** an input of at most 50 MB (50,000,000 bytes), the largest documented one (a board's answer; each task checks its own, smaller cap); a result of at most 64 MiB, past which the child is killed; and the first 64 KiB of the child's stderr kept, whose first 2,000 characters (the logger's cap on any string) go in the log line, which stays on this Mac since it may quote the document.
+  - **Replies:** the child's result with the task's media type, or `{ error: { code } }`: `404 unknown_task`, `413 too_large`, `500 failed` or `too_much_output`, and `504 timed_out`.
   - **Each task runs in a child process,** started with `child_process.spawn(process.execPath, [...])`, never through a shell or `fork`:
-    - `--permission`, `--disable-sigusr1`, `--max-old-space-size=256`, and `--allow-fs-read` for the job's folder and the granted code's real paths only;
+    - `--permission`, `--disable-sigusr1`, `--max-old-space-size=256`, `--no-experimental-sqlite`, `--freeze-flags-after-init`, and `--allow-fs-read` for the job's folder and the granted code's real paths only. The two in the middle close ways round the permission model, which checks neither: `node:sqlite` reads and writes database files anywhere, and V8 writes its traces (to a file the child can name) once a flag such as `--trace-turbo` is turned on through `v8.setFlagsFromString`. With its flags frozen, V8 stops the process instead;
     - no writes, child processes, workers or network;
     - its own minimal environment, with no `NODE_OPTIONS`;
     - piped standard streams only, with no other file descriptors and no IPC channel;
@@ -274,10 +277,11 @@ The subcommands:
   - starts each process from `current`, with `env -i` plus its allowed names, the absolute Node path, `--disable-sigusr1` on its command line, and output to `logs/<start>-<process>.log`, keeping the last 10 starts and starting a new file when one passes 20 MB:
     - the document service on its socket;
     - the backend on `127.0.0.1:4311`;
-    - the web app as `node --disable-sigusr1 --permission --allow-fs-read=<the release folder> --allow-net <the release>/apps/web/node_modules/next/dist/bin/next start --experimental-next-config-strip-types -H 127.0.0.1 -p 4310`, with `NEXT_PRIVATE_OUTPUT_TRACE_ROOT=<the release folder>` and `NEXT_TELEMETRY_DISABLED=1`. Tried in T2 on Next.js 16.4.5:
+    - the web app as `node --disable-sigusr1 --permission --allow-fs-read=<the release folder> --allow-net --no-experimental-sqlite --freeze-flags-after-init <the release>/apps/web/node_modules/next/dist/bin/next start --experimental-next-config-strip-types -H 127.0.0.1 -p 4310`, with `NEXT_PRIVATE_OUTPUT_TRACE_ROOT=<the release folder>` and `NEXT_TELEMETRY_DISABLED=1`. Tried in T2 on Next.js 16.4.5:
       - the strip-types flag loads `next.config.ts` with Node's own type stripping, so no native SWC addon is needed (the permission model refuses addons);
       - the root variable stops Next's search for a workspace root above the release folder, which reads outside the grant;
-      - it needs no `--allow-addons`, no write grant, no workers and no child processes.
+      - it needs no `--allow-addons`, no write grant, no workers and no child processes;
+      - the sqlite and frozen-flags flags close the same ways round the permission model as for the document service's children. Tried in T12's review: `next start` serves with both, since only `next build`'s memory-debugging mode changes a V8 flag.
 
       The root variable is private to Next.js: if an upgrade drops it, the start fails on the permission model, and T19's test shows it;
   - checks with `lsof` that every listener is on loopback;

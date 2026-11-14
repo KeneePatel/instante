@@ -5,8 +5,8 @@ import type { Pool } from './pool.ts';
 import { PGBOSS_SCHEMA_VERSION } from './queue.ts';
 
 // What /readyz checks, as instante_app (docs/specs/platform.md, "api"): the database answers,
-// our migrations are current, and pg-boss's schema is the one this release runs on. The
-// document service's own check arrives with it (T12).
+// our migrations are current, and pg-boss's schema is the one this release runs on. start.ts
+// adds the document service's check beside these (kit/documents-client.ts, `answers`).
 
 export type ReadinessCheck = 'database' | 'migrations' | 'queue';
 
