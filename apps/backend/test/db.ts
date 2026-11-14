@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import pg from 'pg';
 
 // Scratch databases for the runner's tests, on the cluster scripts/dev-db.sh set up: Homebrew's
@@ -15,6 +16,16 @@ function ownerUrl(): string {
   } catch (cause) {
     throw new Error(`No test database: run scripts/dev-db.sh first (${OWNER_URL_FILE})`, { cause });
   }
+}
+
+/** A superuser on the test cluster: your own on Homebrew's, postgres on CI's service. */
+export function adminUrl(database: string): string {
+  const url = new URL(
+    process.env['INSTANTE_TEST_ADMIN_URL'] ??
+      `postgresql://${userInfo().username}@localhost:5432/postgres`,
+  );
+  url.pathname = `/${database}`;
+  return url.href;
 }
 
 /** The URL of a database on the test cluster, as one of the two roles. */
@@ -42,11 +53,19 @@ export async function scratchDatabase(locale: string = PINNED): Promise<string> 
   return name;
 }
 
+/** Drops every scratch database once its clients are closed. A plain DROP waits out an
+ * autovacuum worker, which instante_owner may not terminate; another session is retried. */
 export async function dropScratchDatabases(): Promise<void> {
   for (const name of created.splice(0)) {
-    await asOwner('instante_test', (client) =>
-      client.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`),
-    );
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await asOwner('instante_test', (client) => client.query(`DROP DATABASE IF EXISTS ${name}`));
+        break;
+      } catch (error) {
+        if ((error as { code?: string }).code !== '55006' || attempt === 20) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
   }
 }
 
@@ -56,6 +75,10 @@ export async function asOwner<T>(database: string, work: (client: pg.Client) => 
 
 export async function asApp<T>(database: string, work: (client: pg.Client) => Promise<T>) {
   return as(urlFor(database, 'app'), work);
+}
+
+export async function asAdmin<T>(database: string, work: (client: pg.Client) => Promise<T>) {
+  return as(adminUrl(database), work);
 }
 
 async function as<T>(connectionString: string, work: (client: pg.Client) => Promise<T>) {

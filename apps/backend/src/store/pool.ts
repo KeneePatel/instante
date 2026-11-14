@@ -13,7 +13,8 @@ export function createPool(
 ): Pool {
   const pool = new pg.Pool({
     connectionString,
-    max: options.max ?? 10,
+    // docs/architecture.md, "Data": a pool of 5 for the app (pg-boss has its own 3).
+    max: options.max ?? 5,
     application_name: options.applicationName ?? 'instante',
     connectionTimeoutMillis: 5_000,
     idleTimeoutMillis: 30_000,

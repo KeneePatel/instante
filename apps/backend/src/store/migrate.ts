@@ -3,14 +3,16 @@ import { readFileSync, readdirSync } from 'node:fs';
 import type pg from 'pg';
 
 // The migration runner (docs/specs/platform.md, "store"; docs/architecture.md, "Migrations").
-// Numbered SQL files, applied in order as the database's owner, each in its own transaction
-// with its record in schema_migrations. It refuses to run, and has no mode that relaxes this:
+// Numbered SQL files, applied in order as instante_owner, each in its own transaction with its
+// record in schema_migrations. It refuses to run, and has no mode that relaxes this:
 //
-// - on a file whose name isn't NNNN_name.sql, a gap or a repeated number;
+// - on a file whose name isn't NNNN_name.sql, a gap or a repeated number, a file that isn't
+//   valid UTF-8, and a file that ends or opens transactions or changes role itself (the
+//   runner's own transaction is what makes a failed migration keep nothing);
 // - on an applied migration with no file, or applied out of order;
 // - on a file changed since it was applied;
 // - on a database whose encoding, locale provider or collation isn't the pinned one;
-// - for any role but the database's owner.
+// - for any role but instante_owner, owning the database, and not a superuser.
 //
 // A rollback restores a dump instead (docs/specs/platform.md, "The local stack").
 
@@ -26,9 +28,13 @@ export const PINNED_LOCALE = {
   ctype: 'C',
 } as const;
 
+/** The one role that runs migrations, so every object it creates has the same owner. */
+export const OWNER_ROLE = 'instante_owner';
+
+/** One runner at a time, across every process that migrates the same database. */
+export const MIGRATION_LOCK_KEY = '7346917310026113';
+
 const FILE_NAME = /^(\d{4})_([a-z0-9]+(?:_[a-z0-9]+)*)\.sql$/;
-/** One runner at a time, across every process that migrates this database. */
-const LOCK_KEY = '7346917310026113';
 
 export type Migration = { name: string; sha256: string; sql: string };
 export type Applied = { name: string; sha256: string; appliedAt: Date };
@@ -47,26 +53,37 @@ export class MigrationError extends Error {
 /** The folder's migrations in order, refusing any file the runner wouldn't know how to place. */
 export function readMigrations(folder: URL = MIGRATIONS): Migration[] {
   const problems: string[] = [];
-  const files = readdirSync(folder).sort();
-  files.forEach((file, i) => {
+  const migrations: Migration[] = [];
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  for (const file of readdirSync(folder).sort()) {
     const match = FILE_NAME.exec(file);
     if (match === null) {
       problems.push(`${file} isn't named NNNN_name.sql`);
-      return;
+      continue;
     }
-    const expected = String(i + 1).padStart(4, '0');
-    if (match[1] !== expected)
+    // Numbered among the well-named files, so one stray file reports only itself.
+    const expected = String(migrations.length + 1).padStart(4, '0');
+    if (match[1] !== expected) {
       problems.push(`${file} should be numbered ${expected}: a gap or a repeat`);
-  });
-  if (problems.length > 0) throw new MigrationError(problems);
-  return files.map((file) => {
+    }
     const bytes = readFileSync(new URL(file, folder));
-    return {
+    let sql = '';
+    try {
+      sql = decoder.decode(bytes);
+    } catch {
+      problems.push(`${file} isn't valid UTF-8`);
+    }
+    for (const statement of forbiddenStatements(sql)) {
+      problems.push(`${file} runs ${statement} itself; the runner holds the transaction and role`);
+    }
+    migrations.push({
       name: file.replace(/\.sql$/, ''),
       sha256: createHash('sha256').update(bytes).digest('hex'),
-      sql: bytes.toString('utf8'),
-    };
-  });
+      sql,
+    });
+  }
+  if (problems.length > 0) throw new MigrationError(problems);
+  return migrations;
 }
 
 /** What has run and what would run next, after every check; changes nothing. Any role may
@@ -99,30 +116,45 @@ export async function migrate(
   client: pg.ClientBase,
   migrations: readonly Migration[] = readMigrations(),
 ): Promise<string[]> {
-  await client.query('SELECT pg_advisory_lock($1::bigint)', [LOCK_KEY]);
+  await client.query('SELECT pg_advisory_lock($1::bigint)', [MIGRATION_LOCK_KEY]);
   try {
     const { pending } = await migrationStatus(client, migrations, { asOwner: true });
-    for (const migration of pending) {
-      try {
-        await client.query('BEGIN');
-        await client.query("SET LOCAL lock_timeout = '10s'");
-        await client.query(migration.sql);
-        await client.query('INSERT INTO schema_migrations (name, sha256) VALUES ($1, $2)', [
-          migration.name,
-          migration.sha256,
-        ]);
-        await client.query('COMMIT');
-      } catch (cause) {
-        await client.query('ROLLBACK');
-        throw new MigrationError([`${migration.name} failed, and nothing of it was kept`], {
-          cause,
-        });
-      }
-    }
+    for (const migration of pending) await applyOne(client, migration);
     return pending.map((m) => m.name);
   } finally {
-    await client.query('SELECT pg_advisory_unlock($1::bigint)', [LOCK_KEY]);
+    await client.query('SELECT pg_advisory_unlock($1::bigint)', [MIGRATION_LOCK_KEY]);
   }
+}
+
+async function applyOne(client: pg.ClientBase, migration: Migration): Promise<void> {
+  await client.query('BEGIN');
+  try {
+    const before = await transactionId(client, 'pg_current_xact_id');
+    await client.query("SET LOCAL lock_timeout = '10s'");
+    await client.query(migration.sql);
+    // A second guard on transaction control the file check missed: the SQL must leave the
+    // runner's transaction as it found it.
+    if ((await transactionId(client, 'pg_current_xact_id_if_assigned')) !== before) {
+      throw new MigrationError([
+        `${migration.name} ended the runner's transaction, so part of it may have been kept: ` +
+          'restore the dump taken before this release',
+      ]);
+    }
+    await client.query('INSERT INTO public.schema_migrations (name, sha256) VALUES ($1, $2)', [
+      migration.name,
+      migration.sha256,
+    ]);
+    await client.query('COMMIT');
+  } catch (cause) {
+    await client.query('ROLLBACK');
+    if (cause instanceof MigrationError) throw cause;
+    throw new MigrationError([`${migration.name} failed, and nothing of it was kept`], { cause });
+  }
+}
+
+async function transactionId(client: pg.ClientBase, fn: string): Promise<string | null> {
+  const { rows } = await client.query<{ id: string | null }>(`SELECT ${fn}()::text AS id`);
+  return rows[0]?.id ?? null;
 }
 
 async function checkDatabase(client: pg.ClientBase, asOwner: boolean): Promise<string[]> {
@@ -134,12 +166,15 @@ async function checkDatabase(client: pg.ClientBase, asOwner: boolean): Promise<s
     ctype: string;
     owner: boolean;
   }>(
-    `SELECT pg_encoding_to_char(encoding) AS encoding,
-            CASE datlocprovider WHEN 'b' THEN 'builtin' WHEN 'c' THEN 'libc' WHEN 'i' THEN 'icu'
-                                ELSE datlocprovider::text END AS provider,
-            datlocale AS locale, datcollate AS collate, datctype AS ctype,
-            pg_get_userbyid(datdba) = current_user AS owner
-       FROM pg_database WHERE datname = current_database()`,
+    `SELECT pg_encoding_to_char(d.encoding) AS encoding,
+            CASE d.datlocprovider WHEN 'b' THEN 'builtin' WHEN 'c' THEN 'libc' WHEN 'i' THEN 'icu'
+                                  ELSE d.datlocprovider::text END AS provider,
+            d.datlocale AS locale, d.datcollate AS collate, d.datctype AS ctype,
+            current_user = $1 AND pg_get_userbyid(d.datdba) = current_user AND NOT r.rolsuper
+              AS owner
+       FROM pg_database d, pg_roles r
+      WHERE d.datname = current_database() AND r.rolname = current_user`,
+    [OWNER_ROLE],
   );
   const db = rows[0];
   if (db === undefined) return ["the current database isn't in pg_database"];
@@ -155,7 +190,7 @@ async function checkDatabase(client: pg.ClientBase, asOwner: boolean): Promise<s
     problems.push(`the database collates as ${db.collate}/${db.ctype}; migrations need C/C`);
   }
   if (asOwner && !db.owner) {
-    problems.push('migrations run only as the database owner, instante_owner');
+    problems.push(`migrations run only as ${OWNER_ROLE}, owning the database, and no superuser`);
   }
   return problems;
 }
@@ -166,7 +201,85 @@ async function appliedMigrations(client: pg.ClientBase): Promise<Applied[]> {
   );
   if (exists[0]?.found !== true) return [];
   const { rows } = await client.query<{ name: string; sha256: string; applied_at: Date }>(
-    'SELECT name, sha256, applied_at FROM schema_migrations ORDER BY name',
+    'SELECT name, sha256, applied_at FROM public.schema_migrations ORDER BY name',
   );
   return rows.map((row) => ({ name: row.name, sha256: row.sha256, appliedAt: row.applied_at }));
+}
+
+const FORBIDDEN =
+  /^(begin|start\s+transaction|commit|end|abort|rollback(?!\s+to\b)|prepare\s+transaction|(set|reset)(\s+(session|local))?\s+(role|session\s+authorization))\b/i;
+const DOLLAR_TAG = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/;
+
+/** The statements in `sql` that would end or open transactions, or change role, read past
+ * comments, quoted strings and identifiers, and dollar-quoted bodies (so a function's own
+ * BEGIN … END is fine). Errs on the side of refusing. */
+export function forbiddenStatements(sql: string): string[] {
+  return statementsOf(sql)
+    .map((statement) => FORBIDDEN.exec(statement)?.[0])
+    .filter((match): match is string => match !== undefined)
+    .map((match) => match.toUpperCase().replace(/\s+/g, ' '));
+}
+
+/** Each statement's text, split on semicolons, with comments, quoted strings, quoted
+ * identifiers and dollar-quoted bodies taken out. */
+export function statementsOf(sql: string): string[] {
+  const statements: string[] = [];
+  let current = '';
+  let i = 0;
+  /** Moves past a quoted run that ends at `quote`; in an escape string, a backslash takes the
+   * next character. A doubled quote reads as an end and a new start, which keeps the same text
+   * out, so it needs no case of its own. */
+  const skipQuoted = (quote: string, backslash: boolean) => {
+    while (i < sql.length) {
+      const c = sql.charAt(i);
+      if (backslash && c === '\\') i += 2;
+      else if (c === quote) {
+        i += 1;
+        return;
+      } else i += 1;
+    }
+  };
+  while (i < sql.length) {
+    const rest = sql.slice(i);
+    const tag = DOLLAR_TAG.exec(rest)?.[0];
+    if (rest.startsWith('--')) {
+      const end = sql.indexOf('\n', i);
+      i = end === -1 ? sql.length : end + 1;
+    } else if (rest.startsWith('/*')) {
+      // Block comments nest in PostgreSQL.
+      let depth = 0;
+      do {
+        if (sql.startsWith('/*', i)) {
+          depth += 1;
+          i += 2;
+        } else if (sql.startsWith('*/', i)) {
+          depth -= 1;
+          i += 2;
+        } else i += 1;
+      } while (depth > 0 && i < sql.length);
+    } else if (/^[eE]'/.test(rest)) {
+      i += 2;
+      skipQuoted("'", true);
+      current += ' ';
+    } else if (rest.startsWith("'") || rest.startsWith('"')) {
+      i += 1;
+      skipQuoted(rest.charAt(0), false);
+      current += ' ';
+    } else if (tag !== undefined) {
+      const end = sql.indexOf(tag, i + tag.length);
+      i = end === -1 ? sql.length : end + tag.length;
+      current += ' ';
+    } else if (rest.startsWith(';')) {
+      statements.push(current.trim());
+      current = '';
+      i += 1;
+    } else {
+      current += sql.charAt(i);
+      i += 1;
+    }
+  }
+  statements.push(current.trim());
+  return statements
+    .map((statement) => statement.replace(/\s+/g, ' '))
+    .filter((statement) => statement.length > 0);
 }

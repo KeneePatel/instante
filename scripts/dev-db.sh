@@ -12,15 +12,24 @@
 # real-use cluster in ~/.instante. Written for macOS's bash 3.2.
 set -u -o pipefail
 
-cd "$(git rev-parse --show-toplevel)" || exit 2
+# The repository this script lives in, whatever folder it's run from.
+root="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+[ -n "$root" ] && [ -f "$root/apps/backend/src/main.ts" ] || {
+  echo "dev-db: can't find the repository around $0" >&2
+  exit 2
+}
+cd "$root" || exit 2
 
 host="${PGHOST:-localhost}"
 port="${PGPORT:-5432}"
 export PGHOST="$host" PGPORT="$port"
 
+# TCP on loopback only: the URLs it writes name a host, and the real-use cluster in
+# ~/.instante listens on a socket folder and never on TCP.
 case "$host" in
-  *".instante"*)
-    echo "dev-db: PGHOST points into a .instante folder; this script is for development only" >&2
+  localhost | 127.0.0.1) ;;
+  *)
+    echo "dev-db: PGHOST must be localhost or 127.0.0.1, not $host" >&2
     exit 2
     ;;
 esac
@@ -55,6 +64,11 @@ for name in dev test; do
     psql_admin -c "CREATE DATABASE $db OWNER instante_owner TEMPLATE template0
       ENCODING 'UTF8' LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8' LOCALE 'C'" || exit 1
   fi
+
+  # Database-level rights aren't part of a database's contents, so they're set here each time:
+  # no temporary objects or connections for PUBLIC, and a connection for the app role.
+  psql_admin -c "REVOKE TEMPORARY, CONNECT ON DATABASE $db FROM PUBLIC" -c \
+    "GRANT CONNECT ON DATABASE $db TO instante_app" || exit 1
 
   for role in owner app; do
     file="$secrets/$role-$name.url"

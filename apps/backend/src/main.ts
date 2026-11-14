@@ -17,12 +17,19 @@ try {
       console.log(line);
     });
   } else {
-    const running = await start({ env: process.env });
+    // The stop handlers come before the server listens, so a stop sent as it starts isn't lost.
+    const running = start({ env: process.env });
     for (const signal of ['SIGTERM', 'SIGINT'] as const) {
       process.once(signal, () => {
-        void running.close().then(() => process.exit(0));
+        void running
+          .then((server) => server.close())
+          .then(
+            () => process.exit(0),
+            () => process.exit(1),
+          );
       });
     }
+    await running;
   }
 } catch (error) {
   if (error instanceof ConfigError) {

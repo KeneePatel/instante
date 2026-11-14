@@ -10,15 +10,26 @@ import { manualClock } from '../src/kit/clock.ts';
 import { createLogger } from '../src/kit/logger.ts';
 import { createPool } from '../src/store/pool.ts';
 import type { CliConfig } from '../src/kit/config.ts';
+import type pg from 'pg';
 import {
   MigrationError,
   PINNED_LOCALE,
+  forbiddenStatements,
   migrate,
   migrationStatus,
   readMigrations,
+  statementsOf,
   type Migration,
 } from '../src/store/migrate.ts';
-import { asApp, asOwner, dropScratchDatabases, scratchDatabase, urlFor } from './db.ts';
+import {
+  PINNED,
+  asAdmin,
+  asApp,
+  asOwner,
+  dropScratchDatabases,
+  scratchDatabase,
+  urlFor,
+} from './db.ts';
 
 // The migration runner on a real Postgres 18 (docs/specs/platform.md, acceptance criterion 6):
 // it refuses a gap, an unknown name, a changed file and the wrong locale, and has no mode
@@ -78,9 +89,84 @@ describe('readMigrations', () => {
     ['a name with a hyphen', { '0001_a-b.sql': '' }, /isn't named/],
     ['a name in capitals', { '0001_Baseline.sql': '' }, /isn't named/],
     ['a file that is not SQL', { '0001_a.sql': '', 'README.md': '' }, /README\.md isn't named/],
+    ['a name with text before it', { 'x0001_a.sql': '' }, /x0001_a\.sql isn't named/],
+    ['a name with text after it', { '0001_a.sql.bak': '' }, /0001_a\.sql\.bak isn't named/],
+    ['a name without its dot', { '0001_a~sql': '' }, /0001_a~sql isn't named/],
   ])('refuses %s', (_case, files, message) => {
     expect(() => readMigrations(folderWith(files))).toThrow(MigrationError);
     expect(() => readMigrations(folderWith(files))).toThrow(message);
+  });
+
+  it('reports a stray file alone, without miscounting the files after it', () => {
+    const folder = folderWith({ '.DS_Store': '', '0001_a.sql': '', '0002_b.sql': '' });
+    let problems: readonly string[] = [];
+    try {
+      readMigrations(folder);
+    } catch (error) {
+      problems = (error as MigrationError).problems;
+    }
+    expect(problems).toEqual([".DS_Store isn't named NNNN_name.sql"]);
+  });
+
+  it('reads UTF-8, and refuses a file that is not valid UTF-8', () => {
+    const [migration] = readMigrations(folderWith({ '0001_a.sql': "SELECT 'café';" }));
+    expect(migration?.sql).toBe("SELECT 'café';");
+    const folder = mkdtempSync(path.join(tmpdir(), 'instante-migrations-'));
+    folders.push(folder);
+    writeFileSync(path.join(folder, '0001_a.sql'), Buffer.from([0x53, 0x45, 0x4c, 0xe9, 0x3b]));
+    expect(() => readMigrations(pathToFileURL(`${folder}/`))).toThrow(
+      /0001_a\.sql isn't valid UTF-8/,
+    );
+  });
+
+  it.each([
+    ['BEGIN', 'BEGIN; CREATE TABLE a (id int); COMMIT;'],
+    ['COMMIT', 'CREATE TABLE half (id int); COMMIT; SELECT 1;'],
+    ['ROLLBACK', 'CREATE TABLE a (id int); ROLLBACK;'],
+    ['ROLLBACK', 'ROLLBACK WORK;'],
+    ['ROLLBACK', "ROLLBACK PREPARED 'x';"],
+    ['START TRANSACTION', 'start  transaction; SELECT 1;'],
+    ['END', 'SELECT 1; END;'],
+    ['ABORT', 'ABORT;'],
+    ['PREPARE TRANSACTION', "PREPARE TRANSACTION 'x';"],
+    ['SET ROLE', 'SET ROLE instante_app; CREATE TABLE a (id int);'],
+    ['SET LOCAL ROLE', 'SET LOCAL ROLE instante_app;'],
+    ['RESET ROLE', 'RESET ROLE;'],
+    ['SET SESSION AUTHORIZATION', 'SET SESSION AUTHORIZATION instante_app;'],
+  ])('refuses a file that runs %s itself: %s', (statement, sql) => {
+    expect(() => readMigrations(folderWith({ '0001_a.sql': sql }))).toThrow(
+      `0001_a.sql runs ${statement} itself`,
+    );
+  });
+
+  it('takes transaction words inside comments, strings, identifiers and function bodies', () => {
+    const sql = [
+      '-- COMMIT;',
+      '/* outer /* COMMIT; */ still a comment; ROLLBACK; */',
+      "SELECT 'it''s; COMMIT;', E'don\\'t; COMMIT;', \"COMMIT;\";",
+      'DO $$ BEGIN PERFORM 1; END $$;',
+      'CREATE FUNCTION f() RETURNS int LANGUAGE plpgsql AS $body$ BEGIN RETURN 1; END; $body$;',
+      'SAVEPOINT s; ROLLBACK TO s; RELEASE s;',
+      'ALTER TABLE t ADD COLUMN end_date date;',
+    ].join('\n');
+    expect(forbiddenStatements(sql)).toEqual([]);
+    expect(statementsOf(sql)).toEqual([
+      'SELECT , ,',
+      'DO',
+      'CREATE FUNCTION f() RETURNS int LANGUAGE plpgsql AS',
+      'SAVEPOINT s',
+      'ROLLBACK TO s',
+      'RELEASE s',
+      'ALTER TABLE t ADD COLUMN end_date date',
+    ]);
+  });
+
+  it('errs on the side of refusing: an SQL-standard function body ends in END', () => {
+    expect(
+      forbiddenStatements(
+        'CREATE FUNCTION g() RETURNS int LANGUAGE sql BEGIN ATOMIC SELECT 1; END;',
+      ),
+    ).toEqual(['END']);
   });
 });
 
@@ -163,6 +249,11 @@ describe('migrate', () => {
       "ENCODING 'SQL_ASCII' LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C' LOCALE 'C'",
       /SQL_ASCII/,
     ],
+    [
+      'ICU with C.UTF-8',
+      "ENCODING 'UTF8' LOCALE_PROVIDER icu ICU_LOCALE 'C.UTF-8' LOCALE 'C'",
+      /icu C\.UTF-8/,
+    ],
   ])('refuses a database with the wrong locale: %s', async (_case, locale, named) => {
     const db = await scratchDatabase(locale);
     await asOwner(db, async (client) => {
@@ -172,6 +263,18 @@ describe('migrate', () => {
       expect((await client.query("SELECT to_regclass('schema_migrations') AS t")).rows).toEqual([
         { t: null },
       ]);
+    });
+  });
+
+  it.each([
+    ['collation', "LC_COLLATE 'en_US.UTF-8' LC_CTYPE 'C'", /collates as en_US\.UTF-8\/C/],
+    ['character type', "LC_COLLATE 'C' LC_CTYPE 'en_US.UTF-8'", /collates as C\/en_US\.UTF-8/],
+  ])('refuses a database whose %s is not C', async (_case, lc, named) => {
+    const db = await scratchDatabase(
+      `ENCODING 'UTF8' LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8' ${lc}`,
+    );
+    await asOwner(db, async (client) => {
+      expect(await problemsOf(() => migrate(client, real))).toMatch(named);
     });
   });
 
@@ -185,12 +288,125 @@ describe('migrate', () => {
     });
   });
 
-  it('runs only as the database owner', async () => {
+  it('runs only as instante_owner, owning the database: never the app role or a superuser', async () => {
+    const owned = /migrations run only as instante_owner, owning the database, and no superuser/;
     const db = await scratchDatabase();
     await asApp(db, async (client) => {
-      expect(await problemsOf(() => migrate(client, real))).toMatch(
-        /migrations run only as the database owner/,
+      expect(await problemsOf(() => migrate(client, real))).toMatch(owned);
+    });
+    await asAdmin(db, async (client) => {
+      expect(await problemsOf(() => migrate(client, real))).toMatch(owned);
+    });
+    // A database a superuser made for itself, as a bare createdb would.
+    const theirs = `instante_t_${String(process.pid)}_admin`;
+    await asAdmin('postgres', (client) =>
+      client.query(`CREATE DATABASE ${theirs} TEMPLATE template0 ${PINNED}`),
+    );
+    // And one the app role owns, though no superuser.
+    const apps = `instante_t_${String(process.pid)}_apps`;
+    await asAdmin('postgres', (client) =>
+      client.query(`CREATE DATABASE ${apps} OWNER instante_app TEMPLATE template0 ${PINNED}`),
+    );
+    try {
+      await asAdmin(theirs, async (client) => {
+        expect(await problemsOf(() => migrate(client, real))).toMatch(owned);
+      });
+      await asApp(apps, async (client) => {
+        expect(await problemsOf(() => migrate(client, real))).toMatch(owned);
+      });
+    } finally {
+      await asAdmin('postgres', async (client) => {
+        await client.query(`DROP DATABASE ${theirs}`);
+        await client.query(`DROP DATABASE ${apps}`);
+      });
+    }
+  });
+
+  it('keeps nothing of a migration whose record fails, so it never runs twice', async () => {
+    const db = await scratchDatabase();
+    const unrecordable: Migration = {
+      name: '0003_kept',
+      sha256: 'not-a-sha',
+      sql: 'CREATE TABLE kept (id int);',
+    };
+    await asOwner(db, async (client) => {
+      expect(await problemsOf(() => migrate(client, [...real, unrecordable]))).toMatch(
+        /0003_kept failed, and nothing of it was kept/,
       );
+      expect((await client.query("SELECT to_regclass('kept') AS t")).rows).toEqual([{ t: null }]);
+    });
+  });
+
+  it.each([
+    ['COMMIT', 'CREATE TABLE early (id int); COMMIT; CREATE TABLE after_commit (id int);'],
+    ['ROLLBACK', 'CREATE TABLE gone (id int); ROLLBACK;'],
+    ['BEGIN … COMMIT', 'COMMIT; BEGIN; CREATE TABLE own (id int); COMMIT;'],
+  ])(
+    'refuses, as a second guard, SQL that ran %s past the file check, and records nothing',
+    async (_case, sql) => {
+      const db = await scratchDatabase();
+      const sneaky: Migration = { name: '0003_sneaky', sha256: 'f'.repeat(64), sql };
+      await asOwner(db, async (client) => {
+        expect(await problemsOf(() => migrate(client, [...real, sneaky]))).toMatch(
+          /0003_sneaky ended the runner's transaction, so part of it may have been kept/,
+        );
+        const { rows } = await client.query(
+          "SELECT 1 FROM schema_migrations WHERE name = '0003_sneaky'",
+        );
+        expect(rows).toEqual([]);
+      });
+    },
+  );
+
+  it('releases its lock when it returns or fails, with the session still open', async () => {
+    const db = await scratchDatabase();
+    const failing: Migration = {
+      name: '0003_failing',
+      sha256: 'a'.repeat(64),
+      sql: 'SELECT 1 / 0;',
+    };
+    const held = (client: pg.Client) =>
+      client.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()",
+      );
+    await asOwner(db, async (client) => {
+      await migrate(client, real);
+      expect((await held(client)).rows).toEqual([{ n: 0 }]);
+      await problemsOf(() => migrate(client, [...real, failing]));
+      expect((await held(client)).rows).toEqual([{ n: 0 }]);
+      // Another runner isn't kept waiting by this open session.
+      await asOwner(db, async (other) => {
+        await other.query("SET statement_timeout = '3s'");
+        expect(await migrate(other, real)).toEqual([]);
+      });
+    });
+  });
+
+  it('reads the record in name order, however its rows were stored', async () => {
+    const db = await scratchDatabase();
+    await asOwner(db, async (client) => {
+      await migrate(client, real);
+      await client.query(
+        "WITH gone AS (DELETE FROM schema_migrations WHERE name = '0001_baseline' RETURNING *) INSERT INTO schema_migrations SELECT * FROM gone",
+      );
+      const status = await migrationStatus(client, real);
+      expect(status.applied.map((a) => a.name)).toEqual(['0001_baseline', '0002_skeleton']);
+    });
+  });
+
+  it('runs non-ASCII SQL as written', async () => {
+    const db = await scratchDatabase();
+    const [migration] = readMigrations(
+      folderWith({
+        '0001_a.sql': "CREATE TABLE t (v text); INSERT INTO t VALUES ('café, naïve, 東京');",
+      }),
+    );
+    await asOwner(db, async (client) => {
+      await client.query(
+        'CREATE TABLE schema_migrations (name text PRIMARY KEY, sha256 text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())',
+      );
+      await migrate(client, [migration as Migration]);
+      expect((await client.query('SELECT v FROM t')).rows).toEqual([{ v: 'café, naïve, 東京' }]);
     });
   });
 
@@ -251,9 +467,11 @@ describe('the baseline’s grants', () => {
       expect((await client.query('SELECT count(*)::int AS n FROM schema_migrations')).rows).toEqual(
         [{ n: 2 }],
       );
-      // SQLSTATE class 42: insufficient privilege, or no such right.
-      const privilegeError: unknown = expect.stringMatching(/^42/);
+      // SQLSTATE 42 (insufficient privilege) or 23 (a constraint, for the note's length).
+      const refused: unknown = expect.stringMatching(/^(42|23)/);
       for (const sql of [
+        'CREATE TEMP TABLE scratch (id int)',
+        "INSERT INTO skeleton_ping (id, note) VALUES (gen_random_uuid(), repeat('x', 201))",
         "INSERT INTO schema_migrations VALUES ('0003_x', repeat('a', 64))",
         'DELETE FROM schema_migrations',
         'CREATE TABLE nope (id int)',
@@ -262,9 +480,38 @@ describe('the baseline’s grants', () => {
         'ALTER TABLE skeleton_ping ADD COLUMN x int',
       ]) {
         await expect(client.query(sql), sql).rejects.toMatchObject({
-          code: privilegeError,
+          code: refused,
         });
       }
+      // PUBLIC holds nothing on the database; the app role may only connect.
+      const { rows } = await client.query<{ public: number; temp: boolean; connect: boolean }>(
+        `SELECT (SELECT count(*)::int FROM pg_database d, aclexplode(d.datacl) a
+                  WHERE d.datname = current_database() AND a.grantee = 0) AS public,
+                has_database_privilege(current_user, current_database(), 'TEMPORARY') AS temp,
+                has_database_privilege(current_user, current_database(), 'CONNECT') AS connect`,
+      );
+      expect(rows).toEqual([{ public: 0, temp: false, connect: true }]);
+      const { rows: schema } = await client.query<{ public: number }>(
+        `SELECT count(*)::int AS public FROM pg_namespace n, aclexplode(n.nspacl) a
+          WHERE n.nspname = 'public' AND a.grantee = 0`,
+      );
+      expect(schema).toEqual([{ public: 0 }]);
+    });
+  });
+
+  it('let instante_app use the sequences of tables the owner makes later', async () => {
+    const db = await scratchDatabase();
+    await asOwner(db, async (client) => {
+      await migrate(client, real);
+      // A plain sequence: an identity column's own sequence needs no rights of its own.
+      await client.query('CREATE SEQUENCE counter');
+      await client.query("CREATE TABLE numbered (id bigint DEFAULT nextval('counter'), v int)");
+    });
+    await asApp(db, async (client) => {
+      const { rows } = await client.query<{ id: string }>(
+        'INSERT INTO numbered (v) VALUES (1) RETURNING id',
+      );
+      expect(rows).toEqual([{ id: '1' }]);
     });
   });
 });
@@ -285,6 +532,7 @@ describe('createPool', () => {
         "SELECT current_user AS role, current_setting('application_name') AS app",
       );
       expect(rows).toEqual([{ role: 'instante_app', app: 'instante' }]);
+      expect(createPool(urlFor('instante_test', 'app'), { logger }).options.max).toBe(5);
       pool.emit(
         'error',
         Object.assign(new Error('terminating connection'), { severity: 'FATAL', code: '57P01' }),
@@ -331,6 +579,34 @@ describe('cli db', () => {
       expect.stringMatching(/^applied {2}0001_baseline {2}\d{4}-\d\d-\d\dT/),
       expect.stringMatching(/^applied {2}0002_skeleton {2}/),
     ]);
+  });
+
+  it("prints a failing migration's database error sanitized, never its values", async () => {
+    const db = await scratchDatabase();
+    const folder = folderWith({
+      '0001_a.sql':
+        "CREATE TABLE people (email text UNIQUE); INSERT INTO people VALUES ('jordan@example.com'), ('jordan@example.com');",
+    });
+    lines.length = 0;
+    expect(await runCli(config(db), ['db', 'migrate'], print, { migrations: folder })).toBe(1);
+    expect(lines[0]).toMatch(/0001_a failed, and nothing of it was kept/);
+    expect(JSON.parse(lines[1] ?? '')).toEqual({
+      name: 'DatabaseError',
+      code: '23505',
+      constraint: 'people_email_key',
+      table: 'people',
+    });
+    expect(lines.join('\n')).not.toMatch(/jordan/);
+  });
+
+  it('lets an error that is no refusal through, such as a missing folder or database', async () => {
+    const missing = new URL('file:///nonexistent-instante-migrations/');
+    await expect(
+      runCli(config('instante_test'), ['db', 'status'], print, { migrations: missing }),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(
+      runCli(config('instante_t_no_such_database'), ['db', 'status'], print),
+    ).rejects.toMatchObject({ code: '3D000' });
   });
 
   it('migrate needs the owner role', async () => {
@@ -380,16 +656,26 @@ describe('cli db', () => {
       code: 0,
       out: 'Applied 0001_baseline\nApplied 0002_skeleton\n',
     });
+    const wrong = await scratchDatabase("ENCODING 'UTF8' LOCALE_PROVIDER libc LOCALE 'C'");
+    writeFileSync(file, `${urlFor(wrong, 'owner')}\n`, { mode: 0o600 });
+    const refused = await run(['db', 'migrate']);
+    expect(refused.code).toBe(1);
+    expect(refused.out).toMatch(/The migrations can't run/);
   }, 15_000);
 
-  it.each([[[]], [['db']], [['db', 'drop']], [['db', 'migrate', '--force']], [['users', 'add']]])(
-    'shows its usage for %j, and exits 64',
-    async (args) => {
-      lines.length = 0;
-      expect(await runCli(config('instante_test'), args, print)).toBe(64);
-      expect(lines).toEqual(['usage: cli db migrate | cli db status']);
-    },
-  );
+  it.each([
+    [[]],
+    [['db']],
+    [['db', 'drop']],
+    [['db', 'migrate', '--force']],
+    [['dbx', 'migrate']],
+    [['DB', 'status']],
+    [['users', 'add']],
+  ])('shows its usage for %j, and exits 64', async (args) => {
+    lines.length = 0;
+    expect(await runCli(config('instante_test'), args, print)).toBe(64);
+    expect(lines).toEqual(['usage: cli db migrate | cli db status']);
+  });
 });
 
 it('pins pg-connection-string to the version pg itself uses, so the guard parses as pg does', () => {

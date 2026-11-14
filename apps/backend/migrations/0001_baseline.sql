@@ -7,8 +7,16 @@ CREATE TABLE schema_migrations (
   applied_at timestamptz NOT NULL DEFAULT now()
 );
 
--- instante_app reads and writes rows, and creates or changes nothing. It may read which
--- migrations ran (for /readyz), but not write that record.
+-- instante_app reads and writes rows, and creates or changes nothing, not even temporary
+-- objects. It may read which migrations ran (for /readyz), but not write that record.
+-- Database-level rights live with the database, not its contents, so whatever makes a
+-- database (scripts/dev-db.sh, the test harness's copies, setup, restore) grants them too.
+DO $$
+BEGIN
+  EXECUTE format('REVOKE TEMPORARY, CONNECT ON DATABASE %I FROM PUBLIC', current_database());
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO instante_app', current_database());
+END
+$$;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO instante_app;
 GRANT SELECT ON schema_migrations TO instante_app;

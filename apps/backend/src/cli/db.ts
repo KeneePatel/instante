@@ -15,6 +15,7 @@ export async function runCli(
   config: CliConfig,
   args: readonly string[],
   print: (line: string) => void,
+  options: { migrations?: URL } = {},
 ): Promise<number> {
   const [group, command, ...rest] = args;
   if (group !== 'db' || (command !== 'migrate' && command !== 'status') || rest.length > 0) {
@@ -33,7 +34,7 @@ export async function runCli(
   const client = new pg.Client({ connectionString: url, application_name: 'instante-cli' });
   await client.connect();
   try {
-    const migrations = readMigrations();
+    const migrations = readMigrations(options.migrations);
     if (command === 'migrate') {
       const applied = await migrate(client, migrations);
       if (applied.length === 0) print('Nothing to apply: the database is current.');

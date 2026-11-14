@@ -162,8 +162,8 @@ That keeps "patched the day it lands" possible without loosening the setting.
   - `GET /healthz` (the process is up) and `GET /readyz` (the database answers, migrations and pg-boss's schema are current, the document service answers), both outside `/api`.
 - **`store`:**
   - a `pg` pool for `instante_app`, and Drizzle over it;
-  - **the migration runner:** numbered `migrations/NNNN_name.sql` files and a `schema_migrations(name, sha256, applied_at)` table. It fails on a gap, an unknown applied name or a changed file, and has no mode that relaxes this; a rollback restores a dump instead ("The local stack"). It also fails if the database's encoding, locale provider or collation isn't the pinned `UTF8` and builtin `C.UTF-8`;
-  - `0001_baseline.sql`: the `schema_migrations` table and the app role's grants;
+  - **the migration runner:** numbered `migrations/NNNN_name.sql` files and a `schema_migrations(name, sha256, applied_at)` table. It fails on a gap, an unknown applied name or a changed file, and has no mode that relaxes this; a rollback restores a dump instead ("The local stack"). It also fails if the database's encoding, locale provider or collation isn't the pinned `UTF8` and builtin `C.UTF-8`, if it isn't run as `instante_owner` owning the database (never a superuser), and on a file that isn't UTF-8 or runs its own transaction control or role change (the runner's one transaction per file is what makes a failed migration keep nothing);
+  - `0001_baseline.sql`: the `schema_migrations` table and the app role's grants: rows read and written, the migrations record read only, nothing created, not even temporary objects. Database-level rights (no `TEMPORARY` or `CONNECT` for `PUBLIC`, `CONNECT` for `instante_app`) live with the database rather than its contents, so whatever makes a database grants them too: `dev-db.sh`, the test harness's copies, `setup` and `restore`;
   - `0002_skeleton.sql`: a `skeleton_ping` table, used by the queue check below.
 - **`cli db migrate`,** run as `instante_owner` (by a release on the Mac, or by `scripts/dev-db.sh` and the tests), in this order:
   1. our runner;

@@ -143,6 +143,7 @@
 - [ ] **T10: The development database and the integration harness** (**review:** store scoping)
   - **Does:**
     - the harness, copying a migrated template database per test worker;
+    - each copy gets the database-level rights 0001 sets (no `TEMPORARY` or `CONNECT` for `PUBLIC`, `CONNECT` for `instante_app`), since `CREATE DATABASE … TEMPLATE` doesn't copy them;
     - Drizzle over the pool, with the person-scoped store rule (every per-person store function takes the person's id).
   - **Acceptance:** integration tests run on copies of the template, on Homebrew's Postgres 18 and in CI, with the pinned locale; T9's runner tests move onto the harness.
   - **Verify:** `pnpm --filter @instante/backend test -- store`.

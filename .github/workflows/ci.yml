@@ -72,6 +72,9 @@ jobs:
           PGUSER: postgres
         run: bash scripts/dev-db.sh
       - name: Tests, with coverage
+        env:
+          # The service's superuser, for the runner's test that a superuser can't migrate.
+          INSTANTE_TEST_ADMIN_URL: postgresql://postgres@localhost:5432/postgres
         run: pnpm test:coverage
       - name: Install diff-cover, every package pinned
         run: |
