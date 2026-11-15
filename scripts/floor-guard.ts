@@ -21,6 +21,8 @@ import { existsSync, readFileSync } from 'node:fs';
 interface Line {
   file: string;
   text: string;
+  /** The file's name before a rename in the same diff, if it was renamed. */
+  from?: string;
 }
 interface Finding {
   rule: string;
@@ -57,30 +59,6 @@ process.chdir(top);
 const mergeBase = git(['merge-base', base, 'HEAD'])?.trim();
 if (mergeBase === undefined || mergeBase === '') bail(`no merge base against ${base}`);
 
-// What the branch's own commits removed with a reason: each such commit vouches for the test
-// files it deletes and the assertion lines it removes, in the file its message names.
-const commits = git(['rev-list', '--no-merges', `${mergeBase}..HEAD`]);
-if (commits === null) bail(`could not list the commits since ${mergeBase}`);
-const reasons = new Map<string, string>();
-const vouchedDeletes = new Set<string>();
-const vouchedLines = new Set<string>();
-for (const commit of commits.split('\n').filter(Boolean)) {
-  const message = git(['log', '-1', '--format=%B', commit]);
-  if (message === null) bail(`could not read commit ${commit}`);
-  for (const [, where, why] of message.matchAll(/^Tests removed from (\S+): (\S.{9,})$/gm)) {
-    if (where === undefined || why === undefined) continue;
-    const diff = git(['show', '--unified=0', '--format=', commit, '--', where]);
-    if (diff === null) bail(`could not read what ${commit} changed in ${where}`);
-    reasons.set(where, why.trim());
-    for (const line of diff.split('\n')) {
-      if (line === '+++ /dev/null') vouchedDeletes.add(where);
-      else if (line.startsWith('-') && !line.startsWith('--- ')) {
-        vouchedLines.add(`${where}\n${line.slice(1).trim()}`);
-      }
-    }
-  }
-}
-
 const tracked = git(['diff', '--unified=0', mergeBase, '--']);
 if (tracked === null) bail(`could not diff against ${mergeBase}`);
 const untrackedList = git(['ls-files', '--others', '--exclude-standard']);
@@ -95,33 +73,72 @@ const untracked = untrackedList
   })
   .join('\n');
 
-// Walk the diff. `---` and `+++` are headers only between a file's `diff` line and its first
-// hunk; inside a hunk every line is content. A deleted file keeps its old name.
-const added: Line[] = [];
-const removed: Line[] = [];
-const deleted: string[] = [];
-const newFiles: string[] = [];
-const pathOf = (s: string): string => s.replace(/^[ab]\//, '');
-let file = '';
-let oldFile = '';
-let inHeader = false;
-for (const line of `${tracked}\n${untracked}`.split('\n')) {
-  if (line.startsWith('diff ')) {
-    inHeader = true;
-  } else if (line.startsWith('@@')) {
-    inHeader = false;
-  } else if (inHeader) {
-    if (line.startsWith('--- ')) oldFile = pathOf(line.slice(4));
-    else if (line.startsWith('+++ ')) {
-      const newFile = pathOf(line.slice(4));
-      file = newFile === '/dev/null' ? oldFile : newFile;
-      if (newFile === '/dev/null') deleted.push(file);
-      if (oldFile === '/dev/null') newFiles.push(file);
+// Walk a diff. `---` and `+++` are headers only between a file's `diff` line and its first
+// hunk; inside a hunk every line is content. A deleted file keeps its old name; a renamed one's
+// lines carry its new name, and its old one in `from`.
+interface Diff {
+  added: Line[];
+  removed: Line[];
+  deleted: string[];
+  newFiles: string[];
+}
+function walk(text: string): Diff {
+  const diff: Diff = { added: [], removed: [], deleted: [], newFiles: [] };
+  const pathOf = (s: string): string => s.replace(/^[ab]\//, '');
+  let file = '';
+  let oldFile = '';
+  let inHeader = false;
+  for (const line of text.split('\n')) {
+    if (line.startsWith('diff ')) {
+      inHeader = true;
+    } else if (line.startsWith('@@')) {
+      inHeader = false;
+    } else if (inHeader) {
+      if (line.startsWith('--- ')) oldFile = pathOf(line.slice(4));
+      else if (line.startsWith('+++ ')) {
+        const newFile = pathOf(line.slice(4));
+        file = newFile === '/dev/null' ? oldFile : newFile;
+        if (newFile === '/dev/null') diff.deleted.push(file);
+        if (oldFile === '/dev/null') diff.newFiles.push(file);
+      }
+    } else if (line.startsWith('+')) {
+      diff.added.push({ file, text: line.slice(1) });
+    } else if (line.startsWith('-')) {
+      const from = oldFile !== file && oldFile !== '/dev/null' ? { from: oldFile } : {};
+      diff.removed.push({ file, text: line.slice(1), ...from });
     }
-  } else if (line.startsWith('+')) {
-    added.push({ file, text: line.slice(1) });
-  } else if (line.startsWith('-')) {
-    removed.push({ file, text: line.slice(1) });
+  }
+  return diff;
+}
+const { added, removed, deleted, newFiles } = walk(`${tracked}\n${untracked}`);
+
+// What the branch's own commits removed with a reason: each such commit vouches for the test
+// files it deletes and the assertion lines it removes, in the file its message names (by its
+// name before or after a rename in that commit), once for each line it removed.
+const commits = git(['rev-list', '--no-merges', `${mergeBase}..HEAD`]);
+if (commits === null) bail(`could not list the commits since ${mergeBase}`);
+const reasons = new Map<string, string>();
+const vouchedDeletes = new Set<string>();
+const vouchedLines = new Map<string, number>();
+const lineKey = (f: string, text: string): string => `${f}\n${text.trim()}`;
+for (const commit of commits.split('\n').filter(Boolean)) {
+  const message = git(['log', '-1', '--format=%B', commit]);
+  if (message === null) bail(`could not read commit ${commit}`);
+  const named = [...message.matchAll(/^Tests removed from (\S+): (\S.{9,})$/gm)];
+  if (named.length === 0) continue;
+  const shown = git(['show', '-M', '--unified=0', '--format=', commit]);
+  if (shown === null) bail(`could not read what ${commit} changed`);
+  const changes = walk(shown);
+  for (const [, where, why] of named) {
+    if (where === undefined || why === undefined) continue;
+    reasons.set(where, why.trim());
+    if (changes.deleted.includes(where)) vouchedDeletes.add(where);
+    for (const line of changes.removed) {
+      if (line.file !== where && line.from !== where) continue;
+      const key = lineKey(line.file, line.text);
+      vouchedLines.set(key, (vouchedLines.get(key) ?? 0) + 1);
+      if (line.file !== where) reasons.set(line.file, why.trim());
+    }
   }
 }
 
@@ -223,8 +240,11 @@ for (const { file: f, text } of removed) {
   if (!isTest(f) || deleted.includes(f) || !/\b(expect|assert)\b/.test(text)) continue;
   const moved = added.some((a) => a.file === f && a.text.trim() === text.trim());
   if (moved) continue;
-  if (vouchedLines.has(`${f}\n${text.trim()}`)) reasoned.add(f);
-  else flag('assertion-removed', f, text);
+  const left = vouchedLines.get(lineKey(f, text)) ?? 0;
+  if (left > 0) {
+    vouchedLines.set(lineKey(f, text), left - 1);
+    reasoned.add(f);
+  } else flag('assertion-removed', f, text);
 }
 
 // 7. The bar weakened in its configuration.

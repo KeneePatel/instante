@@ -239,6 +239,67 @@ describe('floor-guard', () => {
     expect(output).toContain('[test-deleted] src/gone.test.ts');
   });
 
+  it('vouches for each removed line once: the same text removed again later is flagged', () => {
+    const line = '  expect(1).toBe(1);';
+    const repo = makeRepo({
+      'src/kept.test.ts': `it('a', () => {\n${line}\n});\nit('b', () => {\n${line}\n});\n`,
+    });
+    repo.write('src/kept.test.ts', `it('a', () => {});\nit('b', () => {\n${line}\n});\n`);
+    repo.commit("Drop a's check\n\nTests removed from src/kept.test.ts: a no longer checks one");
+    repo.write('src/kept.test.ts', "it('a', () => {});\nit('b', () => {});\n");
+    const { status, output } = repo.run(guard);
+    expect(status).toBe(1);
+    expect(output).toContain('[assertion-removed] src/kept.test.ts: expect(1).toBe(1);');
+  });
+
+  it('holds each reason to its own commit’s files: one it only edits, one it doesn’t name, one it doesn’t touch', () => {
+    const repo = makeRepo({
+      'src/edited.test.ts': "it('a', () => { expect(1).toBe(1); });\n",
+      'src/named.test.ts': "it('b', () => { expect(2).toBe(2); });\n",
+      'src/unnamed.test.ts': "it('c', () => { expect(2).toBe(2); });\n",
+      'src/other.test.ts': "it('d', () => { expect(3).toBe(3); });\n",
+    });
+    // Edits edited.test.ts without removing a check, and deletes named and unnamed, both
+    // holding the same check, naming only named; other.test.ts is named but untouched.
+    repo.write('src/edited.test.ts', "it('a', () => { expect(1).toBe(1); });\n// later\n");
+    repo.remove('src/named.test.ts');
+    repo.remove('src/unnamed.test.ts');
+    repo.commit(
+      [
+        'Rearrange',
+        '',
+        'Tests removed from src/edited.test.ts: about to go, but not in this commit',
+        'Tests removed from src/named.test.ts: what it tested is gone',
+        'Tests removed from src/other.test.ts: named, though this commit leaves it',
+      ].join('\n'),
+    );
+    repo.remove('src/edited.test.ts');
+    repo.remove('src/other.test.ts');
+    repo.commit('Drop the rest');
+    const { status, output } = repo.run(guard);
+    expect(status).toBe(1);
+    expect(output).not.toContain('[test-deleted] src/named.test.ts');
+    expect(output).toContain('[test-deleted] src/unnamed.test.ts');
+    expect(output).toContain('[test-deleted] src/edited.test.ts');
+    expect(output).toContain('[test-deleted] src/other.test.ts');
+  });
+
+  it('follows a test file renamed and trimmed in one commit, named by either name', () => {
+    for (const named of ['src/alpha.test.ts', 'src/beta.test.ts']) {
+      const body = Array.from(
+        { length: 12 },
+        (_, i) => `  expect(${String(i)}).toBe(${String(i)});`,
+      );
+      const repo = makeRepo({ 'src/alpha.test.ts': `it('a', () => {\n${body.join('\n')}\n});\n` });
+      repo.git(['mv', 'src/alpha.test.ts', 'src/beta.test.ts']);
+      repo.write('src/beta.test.ts', `it('a', () => {\n${body.slice(1).join('\n')}\n});\n`);
+      repo.commit(`Rename and trim\n\nTests removed from ${named}: zero is no longer a case`);
+      const { status, output } = repo.run(guard);
+      expect({ named, status, output }).toMatchObject({ status: 0 });
+      expect(output).toContain('zero is no longer a case');
+    }
+  });
+
   it('ignores a reason given before the branch, or not at a line’s start', () => {
     const repo = makeRepo({ 'src/gone.test.ts': "it('a', () => { expect(1).toBe(1); });\n" });
     repo.commit('Tests removed from src/gone.test.ts: said before the branch began');

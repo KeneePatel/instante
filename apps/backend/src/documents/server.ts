@@ -290,13 +290,13 @@ function leftovers(root: string): number {
   return stale.length;
 }
 
-/** Node reads a `*` anywhere in a read grant as a wildcard, and once read a `,` as a list; a
- * control character would break `lsof`'s lines. So the jobs' folder, whose subfolders are
- * granted, may hold none of them. */
+/** Node reads a `*` anywhere in a read grant, the job's folder resolved, as a wildcard; a
+ * control character would garble `lsof`'s lines and the log's. So the jobs' folder may hold
+ * neither. */
 function grantable(folder: string): void {
-  if (/[*,]|\p{Cc}/u.test(folder)) {
+  if (/\*|\p{Cc}/u.test(folder)) {
     throw new Error(
-      `The document service's jobs folder, ${JSON.stringify(folder)}, may not hold a * or a , (which Node reads specially in a read grant) or a control character`,
+      `The document service's jobs folder, ${JSON.stringify(folder)}, may not hold a * (which Node reads in a read grant as a wildcard) or a control character`,
     );
   }
 }

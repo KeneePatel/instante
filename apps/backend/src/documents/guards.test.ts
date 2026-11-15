@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import {
   chmodSync,
   linkSync,
@@ -10,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { ChildReport } from '../kit/probes.ts';
 import {
@@ -64,7 +66,7 @@ describe('checkJobFolder', () => {
     ]);
   });
 
-  it('passes the code’s folder of folders and plain files, and refuses a symlink, a hard link or anything else in it', () => {
+  it('passes the code’s folder of folders and plain files, and refuses a symlink, a hard link or anything else in it', async () => {
     const made = job();
     mkdirSync(path.join(made, 'code', 'documents', 'tasks'), { recursive: true });
     writeFileSync(path.join(made, 'code', 'package.json'), '{}');
@@ -74,10 +76,16 @@ describe('checkJobFolder', () => {
     symlinkSync(path.join(outside, 'secret'), path.join(made, 'code', 'documents', 'link.ts'));
     linkSync(path.join(outside, 'secret'), path.join(made, 'code', 'hard.ts'));
     symlinkSync(outside, path.join(made, 'code', 'documents', 'tasks', 'up'));
+    await promisify(execFile)('mkfifo', [path.join(made, 'code', 'documents', 'fifo.ts')]);
+    // Only the folder named `code` may hold folders.
+    mkdirSync(path.join(made, 'codex'));
+    writeFileSync(path.join(made, 'codex', 'file.ts'), '');
     expect(checkJobFolder(made).sort()).toEqual([
+      "code/documents/fifo.ts isn't a regular file",
       'code/documents/link.ts is a symlink',
       'code/documents/tasks/up is a symlink',
       'code/hard.ts has 2 links',
+      "codex isn't a regular file",
     ]);
   });
 

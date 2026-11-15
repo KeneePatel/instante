@@ -632,6 +632,18 @@ describe('starting and stopping the document service', () => {
       for (let i = 0; i < 40 && (await childrenRunning(script)).length === 0; i++) await sleep(50);
       expect(await childrenRunning(script)).toHaveLength(1);
       expect(readdirSync(jobsRoot)).toHaveLength(1);
+      // Its command line, which every local account can read, names no folder: the grant is
+      // its working folder, and the script is named from there.
+      const [pid] = await childrenRunning(script);
+      const { stdout: command } = await promisify(execFile)('ps', [
+        '-ww',
+        '-o',
+        'command=',
+        '-p',
+        String(pid),
+      ]);
+      expect(command).not.toContain('instante-job-');
+      expect(command.trim().endsWith(`--allow-fs-read=. code/${script}`)).toBe(true);
       const began = Date.now();
       await service.close();
       expect(Date.now() - began).toBeLessThan(2000);

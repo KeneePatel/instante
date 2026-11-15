@@ -453,7 +453,7 @@ describe('the children’s code', () => {
     expect(readdirSync(folder)).toEqual([]);
   });
 
-  it('refuses a jobs folder others can enter, or whose path holds a `*` or a `,`, and takes one with a space', async () => {
+  it('refuses a jobs folder others can enter, or whose real path holds a `*` or a control character, and takes a space or a comma', async () => {
     const socket = () => path.join(privateFolder(), 'documents.sock');
     const open = privateFolder();
     chmodSync(open, 0o750);
@@ -462,29 +462,33 @@ describe('the children’s code', () => {
     );
     // Node reads `*` in a read grant as a wildcard: a grant of <folder>/st*r/x reaches
     // <folder>/stuff. The socket's folder is the jobs' unless the tests give another.
-    for (const name of ['st*r', 'a,b']) {
-      const special = path.join(privateFolder(), name);
+    const starred = path.join(privateFolder(), 'st*r');
+    const tabbed = path.join(privateFolder(), 'a\tb');
+    for (const special of [starred, tabbed]) {
       mkdirSync(special, { mode: 0o700 });
       await expect(start(socket(), { jobsRoot: special })).rejects.toThrow(/may not hold a \*/);
-      await expect(start(path.join(special, 'documents.sock'), undefined)).rejects.toThrow(
-        /may not hold a \*/,
-      );
-      expect(readdirSync(special)).toEqual([]);
-      // Judged by its real path, which is what a child's `.` resolves to.
-      const plain = path.join(privateFolder(), 'plain');
-      symlinkSync(special, plain);
-      await expect(start(path.join(plain, 'documents.sock'), undefined)).rejects.toThrow(
-        /may not hold a \*/,
-      );
     }
-    const spaced = path.join(privateFolder(), 'a b');
-    mkdirSync(spaced, { mode: 0o700 });
-    const service = await start(path.join(spaced, 'documents.sock'), undefined);
-    try {
-      const reply = await createDocumentsClient(service.socket).run('echo', new Uint8Array());
-      expect(reply.status).toBe(200);
-    } finally {
-      await service.close();
+    await expect(start(path.join(starred, 'documents.sock'), undefined)).rejects.toThrow(
+      /may not hold a \*/,
+    );
+    // Judged by its real path, which is what a child's `.` resolves to.
+    const plain = path.join(privateFolder(), 'plain');
+    symlinkSync(starred, plain);
+    await expect(start(path.join(plain, 'documents.sock'), undefined)).rejects.toThrow(
+      /may not hold a \*/,
+    );
+    expect(readdirSync(starred)).toEqual([]);
+    expect(readdirSync(tabbed)).toEqual([]);
+    for (const name of ['a b', 'a,b']) {
+      const folder = path.join(privateFolder(), name);
+      mkdirSync(folder, { mode: 0o700 });
+      const service = await start(path.join(folder, 'documents.sock'), undefined);
+      try {
+        const reply = await createDocumentsClient(service.socket).run('echo', new Uint8Array());
+        expect(reply.status).toBe(200);
+      } finally {
+        await service.close();
+      }
     }
   });
 
@@ -508,6 +512,10 @@ describe('the children’s code', () => {
     const left = path.join(folder, 'instante-job-OLD');
     mkdirSync(left);
     writeFileSync(path.join(left, 'input'), 'an old document');
+    // What else `run/` holds in real use stays.
+    for (const other of ['instante.lock', '.s.PGSQL.5432.lock', 'instante-jobs.pid']) {
+      writeFileSync(path.join(folder, other), '');
+    }
     const first = await start(socket, undefined);
     try {
       // A second service on the same socket is refused before it clears anything.
@@ -528,7 +536,9 @@ describe('the children’s code', () => {
       codeFiles: CHILD_CODE.files.length,
       removed: 1,
     });
-    expect(readdirSync(folder)).toEqual([]);
+    expect(readdirSync(folder).sort()).toEqual(
+      ['.s.PGSQL.5432.lock', 'instante-jobs.pid', 'instante.lock'].sort(),
+    );
   });
 
   it('is needed: through a symlink, inside a grant or anywhere on a path, a child reads what its grants don’t cover, except in a folder whose name nothing else has', async () => {

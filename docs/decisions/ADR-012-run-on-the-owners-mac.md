@@ -48,7 +48,7 @@ Accepted 2026-11-13. At the phase 2 gate the owner chose to run Instante on thei
   | `current` | a link to the live release |
   | `bin/instante` | the owner's command, a link to `current/scripts/local/instante` |
   | `postgres/` | the real-use database cluster |
-  | `run/` | the database's socket, the document service's socket, the lock, the running processes' ids, and one folder per running document job (`instante-job-*`, holding the document and its task's code; a killed service's are removed at its next start) |
+  | `run/` | the database's socket, the document service's socket, the lock, the running processes' ids, and one folder per running document job (`instante-job-*`, holding the document and the children's code; a killed service's are removed at its next start) |
   | `secrets/` | one file per secret, mode `0600`: for each of the three database roles, a `PGPASSFILE` and a connection URL; the Anthropic key from the `ai` module on |
   | `config.env` | settings that aren't secret: Supabase's URL and publishable key, the ports |
   | `backups/` | the database dumps |
@@ -109,7 +109,7 @@ Accepted 2026-11-13. At the phase 2 gate the owner chose to run Instante on thei
 - **Logs:** one file per process per start in `logs/`, a new file past 20 MB, and the last 10 starts kept.
 - **The document service:**
   - each task child is started with `spawn` (never a shell or `fork`), with `--permission`, reads only from its job folder, which holds a copy of its code (a folder whose name nothing else has, holding no symlink, granted as its working folder so the name stays off its command line: Node checks paths as text, so only such a grant holds), no network, writes, child processes or workers, its own minimal environment with no `NODE_OPTIONS`, piped standard streams only, and heap, time and input limits;
-  - job folders come from `mkdtemp` in the service's own folder, and anything in them that isn't a regular file with one link (a symlink, a folder, a hard link) is refused. At start, the service refuses to run if its children's code holds anything but such files;
+  - job folders come from `mkdtemp` in the service's own folder, and anything in them but regular files with one link and the service's own `code/` folder of folders and such files (a symlink, any other folder, a hard link) is refused. At start, the service refuses to run if its children's code holds anything but such files;
   - the service process itself holds no secret and no database password, but nothing sandboxes it: it has to start children, and Node's permission model can't hold a process that may. Its own input comes only from the backend. An exploit that escapes a child runs as the owner, and even a contained one can kill or signal the owner's processes (residual risk R2).
 - **Agents and the real data:** the agents share the Mac and the user account, so the operating system doesn't keep them out. The controls are:
   - [`AGENTS.md`](../../AGENTS.md): never read `~/.instante`, never run `instante`, never connect to the real-use cluster, never loosen the agent settings;

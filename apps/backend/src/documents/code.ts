@@ -13,9 +13,11 @@ import { fileURLToPath } from 'node:url';
 // folder can only have gone through the real folder, and from there the kernel and the text
 // move together. The checkout and the installed packages can't meet that: pnpm's links, here and
 // in any other project, steer the kernel to other folders named `src` or `.pnpm`. The job's
-// folder is granted as `.`, its working folder, and the script named from there, so its name
-// never reaches the child's command line, which every local account can read (`ps`); no one
-// else can plant a folder of a name they never learn.
+// folder is granted as `.`, its working folder, and the script named from there, so the service
+// never puts its name on the child's command line, which every local account can read (`ps`).
+// A compromised child can still publish the name itself (its process title, its CPU time), so
+// another local account working with it could plant a folder of that name where the kernel can
+// be steered: the case threat-model.md accepts under R2, which a sandbox profile would close.
 
 /** The children's code: each task's script and what it imports (Node's built-ins aside), as
  * paths inside `root`, a real path. */
