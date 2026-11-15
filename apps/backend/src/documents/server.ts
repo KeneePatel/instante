@@ -64,7 +64,7 @@ const ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
  * the installed packages. */
 export function grantedCode(root: string = ROOT): string[] {
   return ['apps/backend/src', 'packages/contract', 'node_modules/.pnpm'].map((part) =>
-    realpathSync(path.join(root, part)),
+    realpathSync.native(path.join(root, part)),
   );
 }
 

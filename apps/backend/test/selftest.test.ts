@@ -52,6 +52,29 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     },
   };
 });
+// Every child the service starts, counted; and the backend's lookup, which a test can fail.
+const runs = vi.hoisted(() => ({ count: 0 }));
+vi.mock('../src/documents/run-child.ts', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../src/documents/run-child.ts')>();
+  return {
+    ...real,
+    runChild: (run: Parameters<typeof real.runChild>[0]) => {
+      runs.count++;
+      return real.runChild(run);
+    },
+  };
+});
+const lookupFails = vi.hoisted(() => ({ with: undefined as string | undefined }));
+vi.mock('node:dns/promises', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:dns/promises')>();
+  return {
+    ...real,
+    lookup: (host: string) =>
+      lookupFails.with === undefined
+        ? real.lookup(host)
+        : Promise.reject(Object.assign(new Error(lookupFails.with), { code: lookupFails.with })),
+  };
+});
 
 const children = realpathSync(fileURLToPath(new URL('./children/', import.meta.url)));
 const child = (name: string) => path.join(children, `${name}.ts`);
@@ -220,6 +243,20 @@ describe('selftest', () => {
     ]);
     expect(result.documents?.ok).toBe(true);
   });
+
+  it('fails when the backend can’t look up localhost', async () => {
+    lookupFails.with = 'ENOTFOUND';
+    try {
+      const result = await createDocumentsClient(service.socket).selftest(targets);
+      expect(result.ok).toBe(false);
+      expect(result.positiveControl).toEqual({ tcp: 'allowed', lookup: 'failed: ENOTFOUND' });
+      expect(result.problems).toEqual([
+        "the backend couldn't look up localhost: failed: ENOTFOUND",
+      ]);
+    } finally {
+      lookupFails.with = undefined;
+    }
+  });
 });
 
 describe('selftest’s checks of the service itself', () => {
@@ -284,18 +321,26 @@ describe('the backend’s side of selftest', () => {
     const problems = async (status: number, body: string) =>
       (await createDocumentsClient(await fake(status, body)).selftest(targets)).problems;
     expect(await problems(200, JSON.stringify(passing))).toEqual([]);
-    expect(await problems(200, JSON.stringify({ ...passing, extra: 1 }))).toEqual([
-      "the document service's selftest reply doesn't parse",
-    ]);
-    expect(
-      await problems(200, JSON.stringify({ ...passing, child: { ...passing.child, probes: {} } })),
-    ).toEqual(["the document service's selftest reply doesn't parse"]);
+    for (const reply of [
+      { ...passing, extra: 1 },
+      { ...passing, service: { ...passing.service, extra: true } },
+      { ...passing, child: { ...passing.child, probes: {} } },
+      { ...passing, child: { ...passing.child, probes: { ...DENIED, extra: 'denied' } } },
+      { ...passing, child: { ...passing.child, probes: { ...DENIED, tcp: 'maybe' } } },
+    ]) {
+      expect(await problems(200, JSON.stringify(reply)), JSON.stringify(reply)).toEqual([
+        "the document service's selftest reply doesn't parse",
+      ]);
+    }
     expect(await problems(200, 'not json')).toEqual(["the selftest reply isn't JSON"]);
     expect(await problems(200, JSON.stringify({ ...passing, ok: false }))).toEqual([
       'the document service failed its selftest without saying why',
     ]);
     expect(await problems(500, '{"error":{"code":"failed"}}')).toEqual([
       'the document service answered selftest with 500',
+    ]);
+    expect(await problems(504, '{"error":{"code":"timed_out"}}')).toEqual([
+      'the document service answered selftest with 504',
     ]);
   });
 
@@ -355,6 +400,7 @@ describe('the job folder check', () => {
       ],
     ];
     const client = createDocumentsClient(service.socket);
+    const started = runs.count;
     for (const [problem, make] of plants) {
       plant.next = make;
       const reply = await client.run('echo', new TextEncoder().encode('hello'));
@@ -366,12 +412,14 @@ describe('the job folder check', () => {
         task: 'echo',
         problems: [problem],
       });
+      // Refused before its child started, not after.
+      expect(runs.count).toBe(started);
     }
-    // No child ran, and every folder went.
     expect(lines.filter((line) => line['event'] === 'documents.run')).toEqual([]);
     expect(readdirSync(jobsRoot)).toEqual([]);
     // The next job, with nothing planted, runs.
     expect((await client.run('echo', new TextEncoder().encode('hello'))).status).toBe(200);
+    expect(runs.count).toBe(started + 1);
   });
 });
 
@@ -392,9 +440,10 @@ describe('the granted code at start', () => {
     expect(existsSync(socket)).toBe(false);
   });
 
-  it('is needed: a child reads outside its grant through a symlink inside it', async () => {
+  it('is needed: a child reads outside its grant through a symlink, or by `..` after one', async () => {
     const grant = privateFolder();
     symlinkSync(secret, path.join(grant, 'link'));
+    symlinkSync('.', path.join(grant, 'up'));
     const read = async (file: string) => {
       const done = await runChild({
         script: child('reads'),
@@ -406,6 +455,11 @@ describe('the granted code at start', () => {
     };
     expect(await read(secret)).toBe('ERR_ACCESS_DENIED');
     expect(await read(path.join(grant, 'link'))).toBe('postgresql://instante_app:hex@/instante');
+    // As text, `up/..` is the grant itself, so this reads as inside it; the kernel climbs from
+    // where `up` points, the grant, to the folder holding the secrets.
+    const climb = `${grant}/up/../${path.relative(path.dirname(grant), secret)}`;
+    expect(path.normalize(climb).startsWith(`${grant}/`)).toBe(true);
+    expect(await read(climb)).toBe('postgresql://instante_app:hex@/instante');
   });
 
   it('starts on the real granted code, and logs what it walked', async () => {
@@ -423,14 +477,15 @@ describe('the granted code at start', () => {
 });
 
 describe('selftest in a service started as `instante start` will start it', () => {
-  it('passes with env -i and its own names, --disable-sigusr1, and the lock on descriptor 9', async () => {
+  it('passes with env -i and its own names, --disable-sigusr1, and the lock file open on descriptor 9', async () => {
     const socket = path.join(privateFolder(), 'documents.sock');
     const lock = path.join(privateFolder(), 'instante.lock');
     const lockFd = openSync(lock, 'a');
     const main = fileURLToPath(new URL('../src/main.ts', import.meta.url));
     const service = spawn(process.execPath, ['--disable-sigusr1', main], {
       env: env(socket),
-      // The launcher's lock, inherited by each Instante process, which its children mustn't get.
+      // The launcher's lock file, inherited by each Instante process, which its children mustn't
+      // get. Node can't take the lock itself; the file's descriptor is what a child would hold.
       stdio: ['ignore', 'pipe', 'pipe', ...Array<'ignore'>(6).fill('ignore'), lockFd],
       timeout: 15_000,
     });
@@ -439,7 +494,7 @@ describe('selftest in a service started as `instante start` will start it', () =
       let out = '';
       service.stdout?.on('data', (chunk: Buffer) => (out += chunk.toString()));
       for (let i = 0; i < 100 && !out.includes('documents.listening'); i++) await sleep(50);
-      // The service holds the lock, so the check below has something to find.
+      // The service holds the lock file, so the check below has something to find.
       const held = await listOpenFiles(service.pid ?? 0);
       expect(held).toContainEqual(expect.objectContaining({ fd: '9', type: 'REG', name: lock }));
 

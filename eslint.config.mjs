@@ -21,13 +21,23 @@ const ENTRY_POINTS = ['api', 'worker', 'cli'];
 
 // The document service starts processes with spawn or execFile, never exec, a shell or fork
 // (docs/specs/platform.md, "documents"). Only those two may be imported: a default or
-// namespace import, or a re-export, is refused as well.
+// namespace import, or a re-export, is refused as well, and so are the other ways in that an
+// author might reach for: node:module's createRequire and node:cluster's fork. No lint rule can
+// see every way round it; these are the plain ones.
 const SPAWN_ONLY = 'The document service starts processes with spawn or execFile only.';
-const DOCUMENTS_PATHS = ['node:child_process', 'child_process'].map((name) => ({
-  name,
-  allowImportNames: ['spawn', 'execFile'],
-  message: SPAWN_ONLY,
-}));
+const DOCUMENTS_PATHS = [
+  ...['node:child_process', 'child_process'].map((name) => ({
+    name,
+    allowImportNames: ['spawn', 'execFile'],
+    message: SPAWN_ONLY,
+  })),
+  ...['node:module', 'module', 'node:cluster', 'cluster'].map((name) => ({
+    name,
+    message: `${SPAWN_ONLY} It loads no module by a name it builds, and forks nothing.`,
+  })),
+];
+// The names that load a built-in module from a string, round an import.
+const LOADERS = '/^(getBuiltinModule|binding|_linkedBinding)$/';
 
 const layerRules = LAYERS.map((layer, i) => ({
   files: [`apps/backend/src/${layer}/**/*.ts`],
@@ -90,9 +100,20 @@ export const untypedConfig = defineConfig([
             "Property:matches([key.name='shell'], [key.value='shell']):not([value.value=false])",
           message: `${SPAWN_ONLY} Never through a shell: \`shell\` may only be false.`,
         },
+        // `shell` set any other way: as a member, or by a string or template naming it.
         {
-          selector: 'ImportExpression[source.value=/child_process$/]',
-          message: `${SPAWN_ONLY} No dynamic import of child_process either.`,
+          selector:
+            "MemberExpression[property.name='shell'], Literal[value='shell']:not(Property[value.value=false] > Literal.key), TemplateElement[value.cooked='shell']",
+          message: `${SPAWN_ONLY} Never through a shell: \`shell\` is only ever written as \`shell: false\`.`,
+        },
+        {
+          selector:
+            "ImportExpression[source.value=/child_process$/], ImportExpression:not([source.type='Literal'])",
+          message: `${SPAWN_ONLY} No dynamic import of child_process, or of a name built at run time.`,
+        },
+        {
+          selector: `MemberExpression:matches([property.name=${LOADERS}], [property.value=${LOADERS}])`,
+          message: `${SPAWN_ONLY} No built-in module loaded by name either.`,
         },
       ],
     },

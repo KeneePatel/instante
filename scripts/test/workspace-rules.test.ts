@@ -80,6 +80,18 @@ describe('package.json files', () => {
   });
 });
 
+describe('the backend’s source', () => {
+  it('is all .ts, the files its lint rules (the layers, and the document service’s ban) cover', () => {
+    const others = readdirSync(new URL('apps/backend/src/', root), {
+      recursive: true,
+      withFileTypes: true,
+    })
+      .filter((entry) => !entry.isDirectory() && !entry.name.endsWith('.ts'))
+      .map((entry) => entry.name);
+    expect(others).toEqual([]);
+  });
+});
+
 describe('the tracked files', () => {
   it('include no symbolic link, whose target could name a local path', () => {
     const entries = execFileSync('git', ['ls-files', '--stage'], {

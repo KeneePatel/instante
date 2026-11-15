@@ -195,7 +195,7 @@ The commands are `platform`'s, plus:
 pnpm --filter @instante/backend cli users add jordan@example.com <user-id>
 ```
 ```bash
-pnpm --filter @instante/backend test -- auth
+pnpm --filter @instante/backend test auth
 ```
 ```bash
 pnpm --filter @instante/web test:e2e -- sign-in

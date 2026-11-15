@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -60,11 +60,10 @@ describe('probeAll', () => {
   it('tries each target, and writes in the folder it’s given', async () => {
     const address = backend.address();
     const port = typeof address === 'object' && address !== null ? address.port : 0;
+    const secrets = path.join(folder, 'secrets');
+    mkdirSync(secrets);
     expect(
-      await probeAll(
-        { port, databaseSocket: path.join(folder, 'db.sock'), secrets: folder },
-        folder,
-      ),
+      await probeAll({ port, databaseSocket: path.join(folder, 'db.sock'), secrets }, folder),
     ).toEqual({
       tcp: 'allowed',
       databaseSocket: 'allowed',
@@ -73,5 +72,7 @@ describe('probeAll', () => {
       spawn: 'allowed',
       readSecrets: 'allowed',
     });
+    expect(existsSync(path.join(folder, 'selftest-write'))).toBe(true);
+    expect(readdirSync(secrets)).toEqual([]);
   });
 });

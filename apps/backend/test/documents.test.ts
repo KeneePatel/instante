@@ -294,10 +294,13 @@ describe('runChild’s onOutput', () => {
     });
 
   it('runs at the first output, and keeps stdin open until it settles, with the child still there', async () => {
-    const calls: { pid: number; alive: boolean }[] = [];
+    const calls: { pid: number; alive?: boolean }[] = [];
     const done = await run('waits', async (pid) => {
+      // Kept on entry, so a call at the second output shows before runChild settles.
+      const call: { pid: number; alive?: boolean } = { pid };
+      calls.push(call);
       await sleep(300);
-      calls.push({ pid, alive: alive(pid) });
+      call.alive = alive(pid);
     });
     expect(done.ok && done.stdout.toString()).toBe('before after');
     expect(calls).toEqual([{ pid: expect.any(Number) as unknown, alive: true }]);

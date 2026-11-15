@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { ChildReport } from '../kit/probes.ts';
 import {
   checkGrantedCode,
@@ -49,11 +49,43 @@ function tree() {
 describe('checkGrantedCode', () => {
   it('passes symlinks that stay inside the grants, and counts what it walked', () => {
     const { a, b, grants } = tree();
+    mkdirSync(path.join(b, 'inner', 'deeper'), { recursive: true });
     symlinkSync('file', path.join(a, 'deep', 'same-folder'));
+    // A link to a file may point anywhere in the grants: `..` after a file goes nowhere.
     symlinkSync(path.join(b, 'file'), path.join(a, 'deep', 'other-grant'));
-    symlinkSync('../b', path.join(a, 'to-folder'));
-    // a: deep, deep/file, three links; b: file.
-    expect(checkGrantedCode(grants)).toEqual({ entries: 6, links: 3 });
+    // A link to a folder may point as deep as itself, or deeper (pnpm's do both).
+    symlinkSync('../b/inner', path.join(a, 'as-deep'));
+    symlinkSync('../b/inner/deeper', path.join(a, 'deeper'));
+    // a: deep, deep/file, four links; b: file, inner, inner/deeper.
+    expect(checkGrantedCode(grants)).toEqual({ entries: 9, links: 4 });
+  });
+
+  it('refuses a link to a folder nearer its grant’s top than the link is, which `..` climbs out of', () => {
+    const { a, b, grants } = tree();
+    symlinkSync('..', path.join(a, 'deep', 'up'));
+    symlinkSync('../../b', path.join(a, 'deep', 'to-b'));
+    symlinkSync('../b', path.join(a, 'to-b'));
+    expect(() => checkGrantedCode(grants)).toThrow(
+      [
+        `${path.join(a, 'to-b')} sits deeper than the folder it points to, ${b}`,
+        `${path.join(a, 'deep', 'to-b')} sits deeper than the folder it points to, ${b}`,
+        `${path.join(a, 'deep', 'up')} sits deeper than the folder it points to, ${a}`,
+      ].join('\n'),
+    );
+  });
+
+  it('resolves a link as the kernel does: `..` after a link outside goes up from its target', () => {
+    const { b, outside, grants } = tree();
+    const root = path.dirname(b);
+    mkdirSync(path.join(b, 'inner'));
+    mkdirSync(path.join(outside, 'dir'));
+    mkdirSync(path.join(outside, 'b', 'inner'), { recursive: true });
+    symlinkSync(path.join(outside, 'dir'), path.join(root, 'l'));
+    // As text, l/.. is the root, so this reads as b/inner; the kernel lands in outside/b/inner.
+    symlinkSync('../l/../b/inner', path.join(b, 'evil'));
+    expect(() => checkGrantedCode(grants)).toThrow(
+      `${path.join(b, 'evil')} points outside, to ${path.join(outside, 'b', 'inner')}`,
+    );
   });
 
   it('refuses a symlink pointing outside the grants, absolute or relative, however deep', () => {
@@ -72,6 +104,14 @@ describe('checkGrantedCode', () => {
         `The document service won't grant its children this code:\n${link} points outside, to ${path.join(outside, 'secret')}`,
       );
     }
+    // A folder beside a grant whose name starts with the grant's is outside it too.
+    const { a, grants } = tree();
+    mkdirSync(`${a}-evil`);
+    writeFileSync(path.join(`${a}-evil`, 'secret'), '');
+    symlinkSync(path.join(`${a}-evil`, 'secret'), path.join(a, 'link'));
+    expect(() => checkGrantedCode(grants)).toThrow(
+      `${path.join(a, 'link')} points outside, to ${path.join(`${a}-evil`, 'secret')}`,
+    );
   });
 
   it('refuses a symlink that points nowhere, or round in a loop', () => {
@@ -105,8 +145,12 @@ describe('checkGrantedCode', () => {
     symlinkSync(a, link);
     const file = path.join(outside, 'secret');
     const missing = path.join(outside, 'missing');
-    expect(() => checkGrantedCode([link, file, missing])).toThrow(
-      [link, file, missing].map((grant) => `${grant} isn't a folder's real path`).join('\n'),
+    // A real folder, reached through a linked parent.
+    const throughLink = path.join(link, 'deep');
+    expect(() => checkGrantedCode([link, file, missing, throughLink])).toThrow(
+      [link, file, missing, throughLink]
+        .map((grant) => `${grant} isn't a folder's real path`)
+        .join('\n'),
     );
   });
 
@@ -156,10 +200,19 @@ describe('checkJobFolder', () => {
     expect(checkJobFolder(made)).toEqual(['input has 2 links']);
   });
 
-  it('refuses a folder others can reach, or one that is a symlink', () => {
-    const open = job();
-    chmodSync(open, 0o750);
-    expect(checkJobFolder(open)).toEqual(["the job's folder isn't the owner's alone"]);
+  it('refuses a folder others can reach, another user’s, or one that is a symlink', () => {
+    for (const mode of [0o750, 0o701]) {
+      const open = job();
+      chmodSync(open, mode);
+      expect(checkJobFolder(open)).toEqual(["the job's folder isn't the owner's alone"]);
+    }
+    const uid = process.getuid?.() ?? 0;
+    const spy = vi.spyOn(process, 'getuid').mockReturnValue(uid + 1);
+    try {
+      expect(checkJobFolder(job())).toEqual(["the job's folder isn't the owner's alone"]);
+    } finally {
+      spy.mockRestore();
+    }
     const link = path.join(folder(), 'job');
     symlinkSync(job(), link);
     expect(checkJobFolder(link)).toEqual(["the job's folder isn't a folder"]);
@@ -220,17 +273,16 @@ describe('unexpectedFiles', () => {
       unexpectedFiles([
         file('rtd', 'DIR', '/'),
         file('mem', 'REG', '/usr/lib/x86_64-linux-gnu/libc.so.6'),
-        file('0', 'unix', 'type=STREAM (CONNECTED)'),
-        file('1', 'FIFO', 'pipe'),
-        file('2', 'PIPE', 'pipe'),
+        ...['0', '1', '2'].map((fd) => file(fd, 'unix', 'type=STREAM (CONNECTED)')),
         file('3', 'a_inode', '[eventpoll:4,5]'),
-        file('4', 'a_inode', '[eventfd:6]'),
+        file('4', 'FIFO', 'pipe'),
         file('5', 'FIFO', 'pipe'),
+        file('6', 'a_inode', '[eventfd:7]'),
       ]),
     ).toEqual([]);
   });
 
-  it('finds a regular file, a socket, a lock, a terminal or a folder beyond them', () => {
+  it('finds a regular file, a socket, a lock, a terminal, a folder, or a pipe where its own aren’t', () => {
     expect(
       unexpectedFiles([
         file('0', 'REG', '/Users/someone/.instante/secrets/database-url'),
@@ -241,6 +293,8 @@ describe('unexpectedFiles', () => {
         file('15', 'DIR', '/Users/someone/.instante'),
         file('16', 'KQUEUE', 'count=0, state=0x8', 'r'),
         file('17', 'sock', 'protocol: TCP'),
+        file('1', 'PIPE', '->0x384b7c6d6c8df314'),
+        file('2', 'FIFO', 'pipe'),
       ]),
     ).toEqual([
       '0 REG /Users/someone/.instante/secrets/database-url',
@@ -251,6 +305,8 @@ describe('unexpectedFiles', () => {
       '15 DIR /Users/someone/.instante',
       '16r KQUEUE count=0, state=0x8',
       '17 sock protocol: TCP',
+      '1 PIPE ->0x384b7c6d6c8df314',
+      '2 FIFO pipe',
     ]);
   });
 });
@@ -276,11 +332,18 @@ describe('serviceFacts', () => {
   it('names every other name, macOS’s own included elsewhere, in order', () => {
     expect(
       serviceFacts({
-        env: { ...ALLOWED_ENV, PATH: '/usr/bin', __CF_USER_TEXT_ENCODING: 'x', HOME: '' },
+        env: {
+          ...ALLOWED_ENV,
+          PATH: '/usr/bin',
+          __CF_USER_TEXT_ENCODING: 'x',
+          HOME: '',
+          // The backend's own, which the documents role refuses, even when empty.
+          PORT: '',
+        },
         execArgv: [],
         platform: 'linux',
       }).extraNames,
-    ).toEqual(['HOME', 'PATH', '__CF_USER_TEXT_ENCODING']);
+    ).toEqual(['HOME', 'PATH', 'PORT', '__CF_USER_TEXT_ENCODING']);
   });
 
   it('finds a database URL under any name, whatever its case', () => {
@@ -288,7 +351,9 @@ describe('serviceFacts', () => {
       serviceFacts({ env: { X: value }, execArgv: [], platform: 'linux' }).databaseUrl;
     expect(facts('postgres://instante_app@/instante')).toBe(true);
     expect(facts(' POSTGRESQL://x')).toBe(true);
+    expect(facts('jdbc:postgresql://localhost/instante')).toBe(true);
     expect(facts('http://postgres.example')).toBe(false);
+    expect(facts('postgres')).toBe(false);
   });
 
   it('finds a secret file’s path: a name ending in _FILE, or a value inside the secrets folder', () => {
@@ -359,10 +424,18 @@ describe('selftestReply', () => {
       "the service's environment holds a secret file's path",
       'the service started without --disable-sigusr1',
     ]);
+    expect(reply({ service: { ...clean, extraNames: ['PATH'] } }).problems).toEqual([
+      "the service's environment holds other names: PATH",
+    ]);
   });
 
   it('names flags that differ in any way, every name in the environment, and each probe not denied', () => {
-    for (const execArgv of [[...FLAGS].reverse(), [...FLAGS, '--inspect'], FLAGS.slice(1)]) {
+    for (const execArgv of [
+      [...FLAGS].reverse(),
+      [...FLAGS, '--inspect'],
+      FLAGS.slice(1),
+      FLAGS.slice(0, -1),
+    ]) {
       expect(reply({ stdout: report({ execArgv }) }).problems).toEqual([
         "the child's flags aren't exactly the expected ones",
       ]);
@@ -370,9 +443,16 @@ describe('selftestReply', () => {
     expect(reply({ stdout: report({ env: ['NODE_OPTIONS', 'PATH'] }) }).problems).toEqual([
       "the child's environment holds NODE_OPTIONS, PATH",
     ]);
+    expect(reply({ stdout: report({ env: ['NODE_OPTIONS'] }) }).problems).toEqual([
+      "the child's environment holds NODE_OPTIONS",
+    ]);
+    // macOS's own name, on macOS only.
     expect(
       reply({ stdout: report({ env: ['__CF_USER_TEXT_ENCODING'] }), platform: 'darwin' }).ok,
     ).toBe(true);
+    expect(reply({ stdout: report({ env: ['__CF_USER_TEXT_ENCODING'] }) }).problems).toEqual([
+      "the child's environment holds __CF_USER_TEXT_ENCODING",
+    ]);
     const { ok, problems } = reply({
       stdout: report({ probes: { ...denied, tcp: 'allowed', readSecrets: 'failed: ENOENT' } }),
     });
@@ -388,6 +468,10 @@ describe('selftestReply', () => {
       'not json',
       '{}',
       JSON.stringify({ ...JSON.parse(report().toString()), x: 1 }),
+      report({ probes: { ...denied, extra: 'denied' } as ChildReport['probes'] }).toString(),
+      report({
+        probes: { ...denied, tcp: 'maybe' } as unknown as ChildReport['probes'],
+      }).toString(),
     ]) {
       const result = reply({ stdout: Buffer.from(stdout) });
       expect(result.child).toBeNull();

@@ -76,7 +76,7 @@
     - gitleaks added to `check:fast`, the floor guard to `check:task`, and a `test` script;
     - CI's guard job: the three guards and their tests.
   - **Acceptance:** each guard fails on a planted case of every rule, and passes on a clean tree. The plants are made in temporary repositories by the tests, never committed. CI's first jobs pass on this pull request.
-  - **Verify:** `pnpm test -- guards`; the pull request's checks.
+  - **Verify:** `pnpm test guards`; the pull request's checks.
   - **Depends on:** T3. **Files:** `scripts/{floor-guard,check-commits,check-agent-settings}.ts`, `scripts/test/guards.test.ts`, `.claude/settings.json`, plus edits to `package.json`, `vitest.config.ts` and `ci.yml`. **Size:** M.
 
 ### Checkpoint 1
@@ -104,13 +104,13 @@
       - ports 4310 and 4311 or the name `instante.localhost` outside real use;
       - a `DOCUMENTS_SOCKET` over 104 bytes.
   - **Acceptance:** each refusal has a test, including a URL whose `host=` points elsewhere.
-  - **Verify:** `pnpm --filter @instante/backend test -- config`.
+  - **Verify:** `pnpm --filter @instante/backend test config`.
   - **Depends on:** T5. **Files:** `src/kit/config.ts`, `src/kit/config.test.ts`. **Size:** S.
 
 - [x] **T7: The logger, errors, clock and ids**
   - **Does:** the JSON logger with one sanitizer, `AppError`, the clock and ids (UUIDv7 rows from Node's `crypto.randomUUIDv7`, and the contract's resume ids).
   - **Acceptance:** the sanitizer redacts `Authorization` and `Cookie`, and keeps only code, constraint and table from a database error.
-  - **Verify:** `pnpm --filter @instante/backend test -- kit`.
+  - **Verify:** `pnpm --filter @instante/backend test kit`.
   - **Depends on:** T6. **Files:** `src/kit/{sanitize,logger,errors,clock,ids}.ts` and their tests. **Size:** S.
 
 - [ ] **T8: The API and its request checks** (**review:** fail-closed routes; the `Host`, `X-Forwarded-Host` and Fetch Metadata checks)
@@ -125,7 +125,7 @@
     - a route without `auth` or a handler fails to register, and test routes don't register in production (platform spec 4);
     - every `user` route answers 401, including encoded paths and trailing slashes;
     - each request check refuses its case.
-  - **Verify:** `pnpm --filter @instante/backend test -- api unauthenticated`.
+  - **Verify:** `pnpm --filter @instante/backend test api unauthenticated`.
   - **Depends on:** T7. **Files:** `src/{main,start}.ts`, `src/api/{app,register-routes,middleware}.ts`, `src/api/handlers/{ping,test-routes}.ts` (the fixture PDF is built there, since `src/` takes nothing from `test/`), `test/{api,unauthenticated-matrix,start}.test.ts`. **Size:** M.
 
 - [x] **T9: The migration runner** (**review:** the runner)
@@ -137,7 +137,7 @@
     - `scripts/dev-db.sh`, creating the development roles on Homebrew's cluster (the owner role with `CREATEDB`) and `instante_dev` and `instante_test` from `template0` with the builtin `C.UTF-8` locale. The runner's tests use `instante_test` until T10's harness arrives;
     - CI's Postgres service, `postgres:18` started with `POSTGRES_INITDB_ARGS` for the pinned locale, and the integration-test job.
   - **Acceptance:** the runner refuses each case (platform spec 6), on Homebrew's Postgres 18 with the pinned locale.
-  - **Verify:** `scripts/dev-db.sh`; `pnpm --filter @instante/backend test -- migrate`.
+  - **Verify:** `scripts/dev-db.sh`; `pnpm --filter @instante/backend test migrate`.
   - **Depends on:** T7. **Files:** `src/store/{pool,migrate}.ts`, `migrations/{0001_baseline,0002_skeleton}.sql`, `src/cli/db.ts`, `scripts/dev-db.sh`, `test/db.ts` (each test's scratch database, until T10's harness) and `test/migrate.test.ts`, plus edits to `src/main.ts` and `ci.yml`. **Size:** M (two of the files are short SQL).
 
 - [x] **T10: The development database and the integration harness** (**review:** store scoping)
@@ -146,7 +146,7 @@
     - each copy gets the database-level rights 0001 sets (no `TEMPORARY` or `CONNECT` for `PUBLIC`, `CONNECT` for `instante_app`), since `CREATE DATABASE … TEMPLATE` doesn't copy them;
     - Drizzle over the pool, with the person-scoped store rule (every per-person store function takes the person's id, as a branded `PersonId`), held by a check over `src/store/` with the TypeScript checker (aliases, methods, callbacks and raw SQL included) and a database check (`user_id` NOT NULL and first in the primary key); every table classified as per person or shared in `schema.ts`.
   - **Acceptance:** integration tests run on copies of the template, on Homebrew's Postgres 18 and in CI, with the pinned locale; T9's runner tests move onto the harness.
-  - **Verify:** `pnpm --filter @instante/backend test -- store`.
+  - **Verify:** `pnpm --filter @instante/backend test store`.
   - **Depends on:** T9. **Files:** `test/{global-setup,db-harness,store-scoping}.ts`, `src/store/{db,schema,person,skeleton}.ts`, `test/store.test.ts`, plus edits to `vitest.config.ts` and `test/migrate.test.ts`. **Size:** S.
 
 - [x] **T11: The queue pattern**
@@ -156,7 +156,7 @@
     - `/readyz` checking the database, our migrations and pg-boss's schema version (the document service's check comes with T12);
     - `skeleton_ping` with `send` and `complete` through `fromDrizzle`.
   - **Acceptance:** a committed transaction writes the row and completes the job, and a rolled-back one leaves neither (platform spec 5); `/readyz` fails on a pg-boss schema mismatch.
-  - **Verify:** `pnpm --filter @instante/backend test -- queue`.
+  - **Verify:** `pnpm --filter @instante/backend test queue`.
   - **Depends on:** T8, T10. **Files:** `src/cli/db.ts`, `src/store/{queue,readiness}.ts`, `src/api/handlers/readyz.ts`, `test/queue.test.ts`, plus edits to `src/start.ts` (the pool and pg-boss started at start) and the test harness (the template gets all of `cli db migrate`). **Size:** M.
   - **Review (fixed):**
     - `completeInTx` takes the fetched job, so pg-boss completes only that attempt, and refuses unless it completed it;
@@ -196,7 +196,7 @@
     - the backend's client over `node:http`, with a total 25-second deadline;
     - `/readyz` failing when the document service doesn't answer.
   - **Acceptance:** `echo` returns the input's length and SHA-256 through the client; a child past 30 seconds is killed; `/readyz` fails with the socket down.
-  - **Verify:** `pnpm --filter @instante/backend test -- documents`.
+  - **Verify:** `pnpm --filter @instante/backend test documents`.
   - **Depends on:** T11. **Files:** `src/documents/{server,run-child,tasks/echo}.ts`, `src/kit/documents-client.ts`, `test/documents.test.ts`, plus an edit to `src/api/handlers/readyz.ts`. **Size:** M.
   - **As built:**
     - `/readyz` needed no change to its handler: `start.ts` adds `documents` beside `failingChecks`, checked by `echo` on an empty input;
@@ -216,32 +216,34 @@
     - a failing stop test leaves no child running: the stop tests give their children a deadline under the test's own and close the service in `finally`, and `forever.ts` ends itself once orphaned. Their `ps` polling no longer blocks the event loop the service under test shares;
     - the spec's order for stopping: the socket goes when it's closed, before the jobs' folders.
   - **Carried forward:**
-    - T13: pnpm links the workspace packages into `node_modules/.pnpm/node_modules/@instante/`, pointing at `apps/web` and `apps/backend`, so a child can read those through the granted code. The start-up walk rightly refuses them; `hoistWorkspacePackages: false` in `pnpm-workspace.yaml` removes them (tried by the review: the lockfile is unchanged and every check passes).
+    - T13: pnpm links the workspace packages into `node_modules/.pnpm/node_modules/@instante/`, pointing at `apps/web` and `apps/backend`, so a child can read those through the granted code. The start-up walk rightly refuses them; `hoistWorkspacePackages: false` in `pnpm-workspace.yaml` keeps them out of a fresh install (tried by the review: the lockfile is unchanged and every check passes).
     - T22: the 30-second kill is a timer in the service, so a child outlives a service killed outright. `stop`, and the launcher when a process exits, signal the process group, which the children share.
     - Accepted under R2, as the threat model already says: a child can still signal the owner's processes, and make one without `--disable-sigusr1` open its debugger (every Instante process has the flag, and the child has no network to reach it).
     - Two services started at once on one stale socket can both bind, and a start that fails after binding leaves its server open. Only the owner's own processes could race there, and T22's `lockf` lock stops a second copy.
 
 - [ ] **T13: The document service's isolation checks** (**review**)
   - **Does:**
-    - the start-up walk refusing symlinks that point outside the granted code;
+    - the start-up walk refusing symlinks that lead out of the granted code;
     - the job-folder check, refusing symlinks, hard links and non-regular files;
     - `selftest` in the service and in a child (on macOS, allowing only `__CF_USER_TEXT_ENCODING`, which CoreFoundation sets in every process), the `lsof -p` check of the child's files, and the backend's positive control (a TCP connection to its own port, and a `localhost` lookup);
     - the ESLint ban on `exec`, shell `execFile` and `fork` in `src/documents/`.
   - **Acceptance:** each probe gives the expected answer; a planted symlink is refused; the positive control succeeds (the Linux half of platform spec 13).
-  - **Verify:** `pnpm --filter @instante/backend test -- selftest`.
+  - **Verify:** `pnpm exec vitest run documents selftest probes lint-rules workspace-rules`.
   - **Depends on:** T12. **Files:** `src/documents/{guards,tasks/selftest}.ts`, `eslint.config.mjs`, `test/selftest.test.ts`. **Size:** M.
   - **As built:**
     - the probes are in `src/kit/probes.ts`, so the backend's positive control and the child run the same code, which uses Node's built-ins only, since a child can load nothing else. Each answers `denied`, `allowed` or `failed: <code>`;
     - the backend's side is `selftest(targets)` on the documents client. It runs the positive control, sends the targets (its port, the database's socket, the secrets folder) as the job's input, and validates the reply. What calls it on a running stack is T18's;
     - `runChild` takes `onOutput`: at the child's first output, `selftest` lists its open files, and the child's stdin stays open until then;
-    - the start-up walk is hand-written: Node's recursive `readdir` follows symlinks into folders (it walked 877,000 entries through the workspace links). The walk takes about 0.3 s;
-    - `hoistWorkspacePackages: false` is in `pnpm-workspace.yaml`. A fresh install has no workspace links in `node_modules/.pnpm`, and the lockfile is unchanged;
-    - the ESLint ban lets `src/documents/` import only `spawn` and `execFile` from `child_process`, with no `shell` but `false` and no dynamic import. `scripts/test/lint-rules.test.ts` tries each form;
+    - the start-up walk is hand-written: Node's recursive `readdir` follows symlinks into folders (it walked 877,000 entries through the workspace links). It resolves each link with `realpath(3)`, and refuses a link to a folder nearer the top of its grant than the link sits in its own (see "Review (fixed)"). The walk takes about 0.4 s;
+    - `hoistWorkspacePackages: false` is in `pnpm-workspace.yaml`. A fresh install has no workspace links in `node_modules/.pnpm`, and the lockfile is unchanged. A checkout installed before it keeps those links until `pnpm install --force`, and the document service refuses to start until then;
+    - the ESLint ban lets `src/documents/` import only `spawn` and `execFile` from `child_process`, nothing from `node:module` or `node:cluster`, `shell` written only as `shell: false`, no dynamic import of `child_process` or of a name built at run time, and no built-in loaded by name (`process.getBuiltinModule` and the like). `scripts/test/lint-rules.test.ts` tries each of those forms, at the folder's top and in `tasks/`. No lint rule sees every way round it (`process['getBuilt' + 'inModule']` passes), so the rule catches the plain ways; the children's own flags are what stop them starting anything. `scripts/test/workspace-rules.test.ts` keeps `apps/backend/src` all `.ts`, the files the rules cover;
     - measured on macOS 27 and Node 26.13.1:
       - every probe in a child answers `ERR_ACCESS_DENIED`, the `localhost` lookup included;
       - a child holds three socket pairs, three kqueues, a pipe pair, `/` open three times and `/dev/null`;
-      - a descriptor its parent inherited (the launcher's lock on fd 9) doesn't reach it, since libuv spawns with `posix_spawn`, which closes every descriptor not passed;
-      - through a symlink inside its grant, a child reads a file outside it, which a test shows.
+      - a descriptor its parent inherited (the launcher's lock file on fd 9) doesn't reach it, since libuv spawns with `posix_spawn`, which on macOS closes every descriptor not passed;
+      - `lsof` reports no locks on macOS, so there a lock file shows only as a regular file, which its type refuses;
+      - through a symlink inside its grant, a child reads a file outside it, which a test shows;
+    - on CI's ubuntu-24.04 runner, every `selftest` test passes too. That includes the service started from `main.ts` holding fd 9, so there too `lsof` is present, the child's descriptors are only Node's own, and the inherited lock file doesn't reach the child (on Linux, Node's start-up sweep marks inherited descriptors close-on-exec).
 
 - [ ] **T14: The web app's request rules** (**review:** `proxy.ts`'s checks)
   - **Does:**
@@ -269,7 +271,7 @@
 - [ ] **T16: The typed fetch helper**
   - **Does:** `lib/api.ts`: requests built from the contract, `credentials: 'omit'`, an injected token provider, replies parsed, `upstream_unavailable`, and `Blob` replies.
   - **Acceptance:** the parsing and the `upstream_unavailable` mapping are unit-tested.
-  - **Verify:** `pnpm --filter @instante/web test -- api`.
+  - **Verify:** `pnpm --filter @instante/web test api`.
   - **Depends on:** T5. **Files:** `apps/web/lib/api.ts`, `apps/web/lib/api.test.ts`. **Size:** S.
 
 - [ ] **T17a: The shell**
@@ -463,7 +465,7 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
     - two fixture users: Jordan Rivera, and one with no account;
     - a drift test running the real `@supabase/supabase-js` against it.
   - **Acceptance:** supabase-js completes code sign-in, authenticator enrolment and verification, and refresh against the fake; the vectors pass.
-  - **Verify:** `pnpm --filter @instante/backend test -- fake-supabase`.
+  - **Verify:** `pnpm --filter @instante/backend test fake-supabase`.
   - **Depends on:** A1, Checkpoint 4. **Files:** `test/fake-supabase/{app,totp,keys,main}.ts`, `test/fake-supabase/fake.test.ts`. **Size:** M.
 
 - [ ] **A3: Token verification and the key cache** (**review**)
@@ -478,7 +480,7 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
     - every bad token in the spec is refused, a good one accepted, and a token with an unknown key refused after one fetch;
     - cached keys verify while the key endpoint is down;
     - a removed key is dropped at the hourly refresh.
-  - **Verify:** `pnpm --filter @instante/backend test -- kit/auth`.
+  - **Verify:** `pnpm --filter @instante/backend test kit/auth`.
   - **Depends on:** A2. **Files:** `src/kit/auth/{verify,key-cache}.ts`, `src/kit/auth/auth.test.ts`, plus an edit to `src/kit/config.ts`. **Size:** M.
 
 - [ ] **A4: Accounts and `authenticate`** (**review:** account linking, and the disabled and two-factor checks)
@@ -490,7 +492,7 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
       - a changed email stored and audited;
       - wired into `main.ts` with the key cache, in place of the one that refuses every token.
   - **Acceptance:** an unknown `sub` with a matching email gets `403 unknown_account`; a disabled account gets `403`; a changed email is updated and audited.
-  - **Verify:** `pnpm --filter @instante/backend test -- authenticate`.
+  - **Verify:** `pnpm --filter @instante/backend test authenticate`.
   - **Depends on:** A3. **Files:** `migrations/0003_accounts.sql`, `src/store/users.ts`, `src/api/authenticate.ts`, `test/{seed,authenticate.test}.ts`, plus an edit to `src/main.ts`. **Size:** M.
 
 - [ ] **A5: `GET /api/me` and the matrices**
@@ -500,7 +502,7 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
     - the unauthenticated matrix extended with `aal1` and with "a Supabase cookie but no bearer";
     - the log test for tokens and cookies.
   - **Acceptance:** `/api/me` returns `{ id, email, onboardingFinished, createdAt }`; both matrices pass; the production build refuses the fake's address, and `src/` can't import it (accounts spec 8).
-  - **Verify:** `pnpm --filter @instante/backend test -- me isolation unauthenticated logs`.
+  - **Verify:** `pnpm --filter @instante/backend test me isolation unauthenticated logs`.
   - **Depends on:** A4. **Files:** `packages/contract/src/routes.ts`, `src/api/handlers/me.ts`, `test/{isolation-matrix,logs}.test.ts`, plus an edit to `test/unauthenticated-matrix.test.ts`. **Size:** M.
 
 - [ ] **A6: The fake in every stack**
@@ -519,7 +521,7 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
     - `lib/auth/token-provider.ts`, the only caller of `getSession()`, retrying once after a 401;
     - `connect-src` with the Supabase address.
   - **Acceptance:** the token provider's outcomes are unit-tested; the floor guard accepts `getSession()` there and nowhere else.
-  - **Verify:** `pnpm --filter @instante/web test -- supabase token-provider`.
+  - **Verify:** `pnpm --filter @instante/web test supabase token-provider`.
   - **Depends on:** A6. **Files:** `apps/web/lib/supabase/{server,browser}.ts`, `apps/web/lib/auth/token-provider.ts`, `apps/web/lib/auth/token-provider.test.ts`, plus edits to `apps/web/app/layout.tsx` and `lib/csp.ts`. **Size:** M.
 
 - [ ] **A8: `proxy.ts`'s session step, with the tests signed in** (**review:** `proxy.ts`'s session logic)
@@ -536,7 +538,7 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
     - the session step's outcomes are unit-tested, including a failed key-set fetch letting the request through;
     - `next=//elsewhere` returns to `/`;
     - every platform test still passes, signed in.
-  - **Verify:** `pnpm --filter @instante/web test -- proxy next-path`; `pnpm --filter @instante/web test:e2e`; the macOS job.
+  - **Verify:** `pnpm --filter @instante/web test proxy next-path`; `pnpm --filter @instante/web test:e2e`; the macOS job.
   - **Depends on:** A7. **Files:** `apps/web/proxy.ts`, `apps/web/lib/auth/next-path.ts`, `apps/web/lib/auth/session.test.ts`, `apps/web/e2e/helpers/sign-in.ts`, plus edits to the existing end-to-end specs and `macos-criteria.test.ts`. **Size:** M.
 
 - [ ] **A9: The sign-in pages**
@@ -568,7 +570,7 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
     - `src/engine/delete-user.ts`: rows removed in one transaction, queued jobs cancelled, one "account deleted" event with no email, a reminder to delete the user in Supabase;
     - the deletion test's fixture, which later modules extend.
   - **Acceptance:** each command works against the test database; after `delete`, none of the person's rows remain and their jobs are cancelled.
-  - **Verify:** `pnpm --filter @instante/backend test -- users`.
+  - **Verify:** `pnpm --filter @instante/backend test users`.
   - **Depends on:** A4 (can run beside A5 to A10). **Files:** `src/cli/users.ts`, `src/engine/delete-user.ts`, `test/users.test.ts`. **Size:** M.
 
 ### Checkpoint 5: `accounts` done
