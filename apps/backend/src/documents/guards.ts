@@ -5,28 +5,41 @@ import { promisify } from 'node:util';
 import { allowedNames, optionNames } from '../kit/config.ts';
 import { ChildReportSchema, type SelftestReply } from '../kit/documents-client.ts';
 import { PROBES } from '../kit/probes.ts';
+import { CODE_FOLDER } from './code.ts';
 
 // The document service's checks on what its children can reach (docs/specs/platform.md,
 // "documents"; docs/threat-model.md, "A restricted child reads through a symlink or an inherited
-// descriptor"). A job's folder, like the code's copy (code.ts), must hold nothing but plain
-// files: Node's permission model follows a symlink inside a read grant wherever it points.
+// descriptor"). A job's folder, the one a child may read, must hold nothing but plain files and
+// the service's copy of its code (code.ts): Node's permission model follows a symlink inside a
+// read grant wherever it points.
 // `selftest` then shows a child's flags, environment, probes and open files, and the service's
 // own environment and flags.
 
 /** What's wrong with a job's folder, if anything: it must be a real folder, the owner's alone,
- * holding only regular files with one link each, since through a symlink or a hard link a child
- * could read what its grant doesn't cover. */
+ * holding only regular files with one link each, and the code's folder (code.ts), holding only
+ * folders and such files. Through a symlink or a hard link a child could read what its grant
+ * doesn't cover. */
 export function checkJobFolder(folder: string): string[] {
   const stat = lstatSync(folder);
   if (!stat.isDirectory()) return ["the job's folder isn't a folder"];
   if (stat.uid !== process.getuid?.() || (stat.mode & 0o077) !== 0) {
     return ["the job's folder isn't the owner's alone"];
   }
+  return entriesProblems(folder, '', false);
+}
+
+/** The problems in `folder`'s entries, named from the job's folder by `prefix`. */
+function entriesProblems(folder: string, prefix: string, inCode: boolean): string[] {
   return readdirSync(folder).flatMap((name) => {
-    const entry = lstatSync(path.join(folder, name));
-    if (entry.isSymbolicLink()) return [`${name} is a symlink`];
-    if (!entry.isFile()) return [`${name} isn't a regular file`];
-    if (entry.nlink !== 1) return [`${name} has ${String(entry.nlink)} links`];
+    const at = path.join(folder, name);
+    const named = `${prefix}${name}`;
+    const entry = lstatSync(at);
+    if (entry.isSymbolicLink()) return [`${named} is a symlink`];
+    if (entry.isDirectory() && (inCode || named === CODE_FOLDER)) {
+      return entriesProblems(at, `${named}/`, true);
+    }
+    if (!entry.isFile()) return [`${named} isn't a regular file`];
+    if (entry.nlink !== 1) return [`${named} has ${String(entry.nlink)} links`];
     return [];
   });
 }

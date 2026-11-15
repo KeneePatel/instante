@@ -64,6 +64,23 @@ describe('checkJobFolder', () => {
     ]);
   });
 
+  it('passes the code’s folder of folders and plain files, and refuses a symlink, a hard link or anything else in it', () => {
+    const made = job();
+    mkdirSync(path.join(made, 'code', 'documents', 'tasks'), { recursive: true });
+    writeFileSync(path.join(made, 'code', 'package.json'), '{}');
+    writeFileSync(path.join(made, 'code', 'documents', 'tasks', 'echo.ts'), '');
+    expect(checkJobFolder(made)).toEqual([]);
+    const outside = outsideFolder();
+    symlinkSync(path.join(outside, 'secret'), path.join(made, 'code', 'documents', 'link.ts'));
+    linkSync(path.join(outside, 'secret'), path.join(made, 'code', 'hard.ts'));
+    symlinkSync(outside, path.join(made, 'code', 'documents', 'tasks', 'up'));
+    expect(checkJobFolder(made).sort()).toEqual([
+      'code/documents/link.ts is a symlink',
+      'code/documents/tasks/up is a symlink',
+      'code/hard.ts has 2 links',
+    ]);
+  });
+
   it('refuses the input itself once it has a second name elsewhere', () => {
     const made = job();
     linkSync(path.join(made, 'input'), path.join(folder(), 'copy'));

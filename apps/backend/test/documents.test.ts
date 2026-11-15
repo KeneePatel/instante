@@ -19,7 +19,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { CHILD_CODE, copyCode, type Code } from '../src/documents/code.ts';
+import { CHILD_CODE, readCode, writeCode, type Code } from '../src/documents/code.ts';
 import { CHILD_TIMEOUT_MS, MAX_CHILD_OUTPUT_BYTES, runChild } from '../src/documents/run-child.ts';
 import {
   MAX_INPUT_BYTES,
@@ -125,7 +125,8 @@ describe('runChild', () => {
         '--max-old-space-size=256',
         '--no-experimental-sqlite',
         '--freeze-flags-after-init',
-        `--allow-fs-read=${jobFolder}`,
+        // The job's folder, as its working folder, so the name stays off the command line.
+        '--allow-fs-read=.',
         `--allow-fs-read=${children}`,
       ],
       // macOS's CoreFoundation sets its text-encoding hint in every process it starts in; the
@@ -256,11 +257,13 @@ describe('runChild', () => {
     expect(getEventListeners(stopping.signal, 'abort')).toEqual([]);
   });
 
-  it('lets a child read its code’s copy and nothing else: not the source, the packages or the checkout', async () => {
-    const copy = copyCode(code, privateFolder());
+  it('lets a child read its job’s folder, with its code, and nothing else: not the source, the packages or the checkout', async () => {
+    const jobFolder = privateFolder();
+    writeFileSync(path.join(jobFolder, 'input'), 'a document');
+    await writeCode(readCode(code), jobFolder);
     const paths = [
-      path.join(copy, 'src/documents/tasks/echo.ts'),
-      path.join(copy, 'package.json'),
+      'input',
+      path.join(jobFolder, 'code/src/documents/tasks/echo.ts'),
       path.join(root, 'apps/backend/src/documents/tasks/echo.ts'),
       path.join(root, 'packages/contract/package.json'),
       realpathSync(createRequire(import.meta.url).resolve('hono')),
@@ -268,10 +271,10 @@ describe('runChild', () => {
       path.join(root, 'package.json'),
     ];
     const done = await runChild({
-      script: path.join(copy, 'test/children/reach.ts'),
+      script: 'code/test/children/reach.ts',
       args: paths,
-      jobFolder: privateFolder(),
-      grants: [copy],
+      jobFolder,
+      grants: [],
     });
     expect(done.ok && JSON.parse(done.stdout.toString())).toEqual([
       'read',
@@ -466,7 +469,6 @@ describe('the document service', () => {
     try {
       const app = createDocumentsApp({
         logger: createLogger({ clock: systemClock, sink: quiet }),
-        code: { source: CHILD_CODE, copy: copyCode(CHILD_CODE, privateFolder()) },
         jobsRoot: privateFolder(),
       });
       const reply = await app.request('/run/echo', { method: 'POST', body: new Uint8Array([1]) });
@@ -495,7 +497,6 @@ describe('the document service', () => {
     const { sink, lines: logged } = recording();
     const app = createDocumentsApp({
       logger: createLogger({ clock: systemClock, sink }),
-      code: { source: CHILD_CODE, copy: copyCode(CHILD_CODE, privateFolder()) },
       jobsRoot: path.join(privateFolder(), 'gone'),
     });
     const reply = await app.request('/run/echo', { method: 'POST', body: new Uint8Array([1]) });
@@ -551,11 +552,7 @@ describe('the document service', () => {
       (JSON.parse(a.body.toString()) as { execArgv: string[] }).execArgv.filter((f) =>
         f.startsWith('--allow-fs-read='),
       ),
-    ).toEqual([
-      `--allow-fs-read=${cwdOf(a)}`,
-      // The code's copy, beside the socket.
-      expect.stringMatching(/^--allow-fs-read=\/.+\/instante-code-\w+$/),
-    ]);
+    ).toEqual(['--allow-fs-read=.']);
     expect((JSON.parse(a.body.toString()) as { input: string }).input).toBe('600');
   });
 });

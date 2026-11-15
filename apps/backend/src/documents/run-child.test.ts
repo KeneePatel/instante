@@ -23,7 +23,8 @@ describe('childArgs', () => {
       '--max-old-space-size=256',
       '--no-experimental-sqlite',
       '--freeze-flags-after-init',
-      '--allow-fs-read=/jobs/instante-job-1',
+      // The job's folder, as the child's working folder, so its name stays off the command line.
+      '--allow-fs-read=.',
       '--allow-fs-read=/code/src',
       '--allow-fs-read=/code/node_modules/.pnpm',
       '/code/src/documents/tasks/echo.ts',

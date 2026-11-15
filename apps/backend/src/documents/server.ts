@@ -9,7 +9,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { systemClock, type Clock } from '../kit/clock.ts';
 import { loadConfig, processRuntime, type Runtime } from '../kit/config.ts';
 import { createLogger, type Logger, type Sink } from '../kit/logger.ts';
-import { CHILD_CODE, SOURCE, copyCode, inCopy, type Code } from './code.ts';
+import { CHILD_CODE, SOURCE, readCode, scriptIn, writeCode, type Code } from './code.ts';
 import {
   checkJobFolder,
   listOpenFiles,
@@ -23,14 +23,14 @@ import { CHILD_TIMEOUT_MS, childFlags, runChild } from './run-child.ts';
 // The document service (docs/specs/platform.md, "documents"; ROLE=documents): a Hono app on the
 // Unix socket DOCUMENTS_SOCKET, with no TCP port and one route, POST /run/:task. It holds no
 // secret and no database URL, and is treated as compromised (docs/threat-model.md). At start it
-// copies its children's code into a folder of its own (code.ts), beside the socket, and grants
-// them only that copy and each job's folder. Each job gets a folder from mkdtemp there too; the
-// service writes the input bytes there itself, checks the folder holds nothing else a child
-// could read through (guards.ts), runs the task's child (run-child.ts) and removes the folder.
+// reads its children's code (code.ts). Each job gets a folder from mkdtemp, beside the socket;
+// the service writes the input bytes and the code there itself, checks the folder holds nothing
+// else a child could read through (guards.ts), runs the task's child with that folder as the
+// only one it may read (run-child.ts), and removes the folder.
 
 export type Task = {
-  /** The child's script: a real path inside the children's code (code.ts), which runs from its
-   * copy. */
+  /** The child's script: a real path inside the children's code (code.ts), which runs from the
+   * copy in its job's folder. */
   script: string;
   /** The reply's media type: what the child writes on stdout. */
   contentType: string;
@@ -59,9 +59,9 @@ export const MAX_INPUT_BYTES = 50_000_000;
 export type DocumentsOptions = {
   logger: Logger;
   tasks?: Readonly<Record<string, Task>>;
-  /** The children's code, and its copy (code.ts): the one folder they may read beside their
-   * job's. */
-  code: { source: Code; copy: string };
+  /** The children's code (code.ts): read here, and written into each job's folder. The
+   * platform's own unless given. */
+  code?: Code;
   /** Where job folders are made: a real path the owner alone can enter. */
   jobsRoot: string;
   maxInputBytes?: number;
@@ -75,14 +75,15 @@ export type DocumentsOptions = {
 
 type ErrorCode = 'unknown_task' | 'too_large' | 'failed' | 'timed_out' | 'too_much_output';
 
-/** Throws if a task's script isn't in the children's code. */
+/** Throws if the children's code can't be given (code.ts), or a task's script isn't in it. */
 export function createDocumentsApp(options: DocumentsOptions): Hono {
-  const { code, jobsRoot } = options;
-  const grants = [code.copy];
-  // Each task as it runs: from the copy.
+  const { jobsRoot } = options;
+  const code = options.code ?? CHILD_CODE;
+  const files = readCode(code);
+  // Each task as its child names its script: inside the job's folder.
   const tasks: Record<string, Task> = Object.fromEntries(
     Object.entries(options.tasks ?? TASKS).map(([name, task]) => {
-      const script = inCopy(code.source, code.copy, task.script);
+      const script = scriptIn(code, task.script);
       if (script === undefined) {
         throw new Error(`The task ${name}'s script, ${task.script}, isn't in its children's code`);
       }
@@ -112,6 +113,7 @@ export function createDocumentsApp(options: DocumentsOptions): Hono {
       const jobFolder = await mkdtemp(path.join(jobsRoot, 'instante-job-'));
       try {
         await writeFile(path.join(jobFolder, 'input'), input, { flag: 'wx', mode: 0o600 });
+        await writeCode(files, jobFolder);
         const refused = checkJobFolder(jobFolder);
         if (refused.length > 0) {
           logger.warn('documents.refused', { task: name, problems: refused });
@@ -122,7 +124,7 @@ export function createDocumentsApp(options: DocumentsOptions): Hono {
           script: task.script,
           args: [],
           jobFolder,
-          grants,
+          grants: [],
           timeoutMs,
           ...(options.signal === undefined ? {} : { signal: options.signal }),
           ...(lsof === undefined ? {} : { onOutput: lsof.onOutput }),
@@ -136,7 +138,7 @@ export function createDocumentsApp(options: DocumentsOptions): Hono {
                     selftestReply({
                       service: serviceFacts(self),
                       stdout: result.stdout,
-                      expectedFlags: childFlags({ jobFolder, grants }),
+                      expectedFlags: childFlags({ jobFolder, grants: [] }),
                       platform: self.platform,
                       openFiles: await lsof.files(),
                     }),
@@ -204,11 +206,8 @@ export type StartDocumentsOptions = {
   clock?: Clock;
   sink?: Sink;
   /** The app's own settings, for tests: the tasks, their code, limits, and where jobs go (the
-   * socket's folder, beside the code's copy, unless given). */
-  documents?: Omit<DocumentsOptions, 'logger' | 'signal' | 'code' | 'jobsRoot'> & {
-    code?: Code;
-    jobsRoot?: string;
-  };
+   * socket's folder unless given). */
+  documents?: Omit<DocumentsOptions, 'logger' | 'signal' | 'jobsRoot'> & { jobsRoot?: string };
 };
 
 /** Throws ConfigError when the configuration refuses to start. */
@@ -222,35 +221,23 @@ export async function startDocuments(options: StartDocumentsOptions): Promise<Ru
     ...(options.sink === undefined ? {} : { sink: options.sink }),
   });
   const socket = config.documentsSocket;
-  // The socket's folder also holds the code's copy, and, unless the tests give another, the
-  // jobs' folders: the owner's alone, so no one else learns or reuses the names a child is
-  // granted.
-  const folder = realpathSync.native(path.dirname(socket));
-  privateFolder(folder, "The document service's socket folder");
-  grantable(folder);
-  const { code: source = CHILD_CODE, jobsRoot = folder, ...documents } = options.documents ?? {};
-  if (jobsRoot !== folder) {
-    privateFolder(jobsRoot, "The document service's jobs folder");
-    grantable(jobsRoot);
-  }
-  // Before binding, so a refusal leaves nothing behind.
-  const copy = copyCode(source, folder);
+  privateFolder(path.dirname(socket), "The document service's socket folder");
+  // Each job's folder, the one its child may read, goes in the socket's folder unless the tests
+  // give another: the owner's alone, by real path, so no one else lists the names.
+  const { jobsRoot: given, ...documents } = options.documents ?? {};
+  const jobsRoot = realpathSync.native(given ?? path.dirname(socket));
+  if (given !== undefined) privateFolder(jobsRoot, "The document service's jobs folder");
+  grantable(jobsRoot);
 
   const stopping = new AbortController();
-  let app: Hono;
-  try {
-    app = createDocumentsApp({
-      ...documents,
-      code: { source, copy },
-      jobsRoot,
-      logger,
-      signal: stopping.signal,
-      self: { env: options.env, execArgv: runtime.execArgv, platform: process.platform },
-    });
-  } catch (error) {
-    rmSync(copy, { recursive: true, force: true });
-    throw error;
-  }
+  // Reads the children's code before binding, so a refusal leaves nothing behind.
+  const app = createDocumentsApp({
+    ...documents,
+    jobsRoot,
+    logger,
+    signal: stopping.signal,
+    self: { env: options.env, execArgv: runtime.execArgv, platform: process.platform },
+  });
   // The requests still being handled: stopping waits for them, since each removes its job's
   // folder only once its child is gone.
   const handling = new Set<Promise<unknown>>();
@@ -263,26 +250,18 @@ export async function startDocuments(options: StartDocumentsOptions): Promise<Ru
       return reply;
     },
   }) as Server;
-  try {
-    await listenOn(server, socket);
-  } catch (error) {
-    rmSync(copy, { recursive: true, force: true });
-    throw error;
-  }
+  await listenOn(server, socket);
   // The folder already keeps everyone else out; the socket itself is the owner's too.
   chmodSync(socket, 0o600);
-  // Bound, so no other service uses this folder: what a killed one left (its code's copy, and
-  // job folders that may hold documents) goes.
-  const stale = [...new Set([folder, jobsRoot])].reduce(
-    (count, where) => count + leftovers(where, copy),
-    0,
-  );
+  // Bound, so no other service answers on this socket: the job folders a killed one left, which
+  // may hold documents, go. One service uses each folder; in real use the launcher's lock keeps
+  // a second one away.
+  const removed = leftovers(jobsRoot);
   logger.info('documents.listening', {
     socket,
     env: config.env,
-    code: copy,
-    codeFiles: source.files.length,
-    removed: stale,
+    codeFiles: (documents.code ?? CHILD_CODE).files.length,
+    removed,
   });
 
   return {
@@ -300,33 +279,31 @@ export async function startDocuments(options: StartDocumentsOptions): Promise<Ru
       // fails at once. The jobs end as their killed children do, each removing its folder.
       await Promise.allSettled(handling);
       rmSync(socket, { force: true });
-      rmSync(copy, { recursive: true, force: true });
     },
   };
 }
 
-/** Removes the code copies and job folders in `root` other than `keep`, and says how many. */
-function leftovers(root: string, keep: string): number {
-  const stale = readdirSync(root).filter(
-    (name) => /^instante-(code|job)-/.test(name) && path.join(root, name) !== keep,
-  );
+/** Removes the job folders in `root`, and says how many. */
+function leftovers(root: string): number {
+  const stale = readdirSync(root).filter((name) => name.startsWith('instante-job-'));
   for (const name of stale) rmSync(path.join(root, name), { recursive: true, force: true });
   return stale.length;
 }
 
-/** Node reads a `*` anywhere in a grant as a wildcard, so the folder whose subfolders are
- * granted must hold no such character: only letters, digits, `.`, `_`, `-` and `/`. */
+/** Node reads a `*` anywhere in a read grant as a wildcard, and once read a `,` as a list; a
+ * control character would break `lsof`'s lines. So the jobs' folder, whose subfolders are
+ * granted, may hold none of them. */
 function grantable(folder: string): void {
-  if (!/^\/[A-Za-z0-9._/-]+$/.test(folder)) {
+  if (/[*,]|\p{Cc}/u.test(folder)) {
     throw new Error(
-      `The document service's folder, ${folder}, may hold only letters, digits, ., _, - and /: Node reads some other characters in a read grant as patterns`,
+      `The document service's jobs folder, ${JSON.stringify(folder)}, may not hold a * or a , (which Node reads specially in a read grant) or a control character`,
     );
   }
 }
 
-/** The socket's folder, and the one holding the code's copy and the jobs' folders, must be the
- * owner's alone: browsers can't reach a socket, but every local user could connect to one in an
- * open folder, and could see the names a child's grants hold. */
+/** The socket's folder, and the jobs' folder, must be the owner's alone: browsers can't reach a
+ * socket, but every local user could connect to one in an open folder, or list the names of
+ * the jobs' folders, which are the children's grants. */
 function privateFolder(folder: string, where: string): void {
   const stat = statSync(folder);
   if (!stat.isDirectory()) throw new Error(`${where} isn't a folder`);

@@ -2,8 +2,10 @@ import { spawn } from 'node:child_process';
 
 // Each document task runs in a child process (docs/specs/platform.md, "documents"), a seat belt
 // against a parser bug, not a sandbox (docs/threat-model.md, R2). The child gets:
-// - Node's permission model, reading only the job's folder and the granted code, with no
-//   writes, child processes, workers, addons or network (all denied unless allowed);
+// - Node's permission model, reading only the job's folder (which holds its code), with no
+//   writes, child processes, workers, addons or network (all denied unless allowed). The folder
+//   is granted as `.`, its working folder, so its name stays off the command line, which every
+//   local account can read;
 // - --disable-sigusr1, so nothing can open its inspector, and a 256 MB heap;
 // - no node:sqlite, and V8's flags frozen once it starts: both write files the permission model
 //   doesn't check (node:sqlite its databases; V8 its traces, through v8.setFlagsFromString);
@@ -23,13 +25,13 @@ export const MAX_CHILD_OUTPUT_BYTES = 64 * 1024 * 1024;
 export const MAX_CHILD_STDERR_BYTES = 64 * 1024;
 
 export type ChildRun = {
-  /** The task's script: an absolute path inside one of `grants`. */
+  /** The task's script: a path inside the job's folder, from it, or inside one of `grants`. */
   script: string;
   /** Arguments after the script. */
   args: readonly string[];
-  /** The job's own folder: the child's working folder, and one of its read grants. */
+  /** The job's own folder: the child's working folder, and its read grant, as `.`. */
   jobFolder: string;
-  /** Real paths, beside the job folder, the child may read: the code it runs. */
+  /** Real paths, beside the job folder, the child may read: none for the service's tasks. */
   grants: readonly string[];
   timeoutMs?: number;
   maxOutputBytes?: number;
@@ -60,7 +62,8 @@ export function childFlags(run: Pick<ChildRun, 'jobFolder' | 'grants'>): string[
     `--max-old-space-size=${String(CHILD_HEAP_MB)}`,
     '--no-experimental-sqlite',
     '--freeze-flags-after-init',
-    ...[run.jobFolder, ...run.grants].map((path) => `--allow-fs-read=${path}`),
+    // `.` is the job's folder, the child's working folder.
+    ...['.', ...run.grants].map((path) => `--allow-fs-read=${path}`),
   ];
 }
 

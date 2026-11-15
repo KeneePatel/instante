@@ -2,16 +2,13 @@ import { execFileSync, spawn } from 'node:child_process';
 import {
   chmodSync,
   closeSync,
-  existsSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
   openSync,
-  readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -21,7 +18,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { CHILD_CODE, copyCode, type Code } from '../src/documents/code.ts';
+import { CHILD_CODE, readCode, writeCode, type Code } from '../src/documents/code.ts';
 import { listOpenFiles } from '../src/documents/guards.ts';
 import { runChild } from '../src/documents/run-child.ts';
 import {
@@ -36,8 +33,8 @@ import type { Sink } from '../src/kit/logger.ts';
 import { probeRead, probeUnixSocket, type SelftestTargets } from '../src/kit/probes.ts';
 
 // The document service's isolation checks (docs/specs/platform.md, "documents", and its criterion
-// 13; T13): selftest with the backend's positive control, the open-files check, the start-up walk
-// over the granted code, and the job-folder check.
+// 13; T13): selftest with the backend's positive control, the open-files check, the children's
+// code in each job's folder and why it's there, and the job-folder check.
 
 // Each job's folder comes from mkdtemp; a test can plant something in the next one before the
 // service checks it.
@@ -203,10 +200,9 @@ describe('selftest', () => {
             '--max-old-space-size=256',
             '--no-experimental-sqlite',
             '--freeze-flags-after-init',
-            expect.stringMatching(new RegExp(`^--allow-fs-read=${jobsRoot}/instante-job-\\w+$`)),
-            // The code's copy, beside the socket.
-            expect.stringMatching(/^--allow-fs-read=\/.+\/instante-code-\w+$/),
-          ] as unknown,
+            // Its job's folder, as its working folder: no folder's name on its command line.
+            '--allow-fs-read=.',
+          ],
           env: PLATFORM_NAMES,
           probes: DENIED,
         },
@@ -435,104 +431,116 @@ describe('the job folder check', () => {
 });
 
 describe('the children’s code', () => {
-  it('refuses to start when the code holds a symlink, before binding its socket, leaving no copy', async () => {
+  const start = (socket: string, documents: Parameters<typeof startDocuments>[0]['documents']) =>
+    startDocuments({
+      env: env(socket),
+      runtime: runtime(['--disable-sigusr1']),
+      sink: recording().sink,
+      ...(documents === undefined ? {} : { documents }),
+    });
+
+  it('refuses to start when the code holds a symlink, or a task’s script isn’t in it, before binding its socket', async () => {
     const source = privateFolder();
     symlinkSync(secret, path.join(source, 'task.ts'));
-    const socket = path.join(privateFolder(), 'documents.sock');
-    const jobsRoot = privateFolder();
-    await expect(
-      startDocuments({
-        env: env(socket),
-        runtime: runtime(['--disable-sigusr1']),
-        sink: recording().sink,
-        documents: { code: { root: source, files: ['task.ts'] }, jobsRoot },
-      }),
-    ).rejects.toThrow(`${path.join(source, 'task.ts')} is reached through a symlink, to ${secret}`);
-    expect(existsSync(socket)).toBe(false);
-    expect(readdirSync(jobsRoot)).toEqual([]);
-  });
-
-  it('leaves no copy when a task’s script isn’t in the code, or the socket is taken', async () => {
     const folder = privateFolder();
-    const start = (tasks?: Record<string, Task>) =>
-      startDocuments({
-        env: env(path.join(folder, 'documents.sock')),
-        runtime: runtime(['--disable-sigusr1']),
-        sink: recording().sink,
-        documents: tasks === undefined ? {} : { tasks },
-      });
+    const socket = path.join(folder, 'documents.sock');
+    await expect(start(socket, { code: { root: source, files: ['task.ts'] } })).rejects.toThrow(
+      `${path.join(source, 'task.ts')} is a symlink`,
+    );
     await expect(
-      start({ outside: { script: child('reads'), contentType: 'text/plain' } }),
+      start(socket, { tasks: { outside: { script: child('reads'), contentType: 'text/plain' } } }),
     ).rejects.toThrow(`The task outside's script, ${child('reads')}, isn't in its children's code`);
     expect(readdirSync(folder)).toEqual([]);
-    writeFileSync(path.join(folder, 'documents.sock'), 'not a socket');
-    await expect(start()).rejects.toMatchObject({ code: 'EADDRINUSE' });
-    expect(readdirSync(folder)).toEqual(['documents.sock']);
   });
 
-  it('refuses a folder for its copy and jobs that others can enter, or whose path holds a `*`', async () => {
-    const start = (jobsRoot: string) =>
-      startDocuments({
-        env: env(path.join(privateFolder(), 'documents.sock')),
-        runtime: runtime(['--disable-sigusr1']),
-        sink: recording().sink,
-        documents: { jobsRoot },
-      });
+  it('refuses a jobs folder others can enter, or whose path holds a `*` or a `,`, and takes one with a space', async () => {
+    const socket = () => path.join(privateFolder(), 'documents.sock');
     const open = privateFolder();
     chmodSync(open, 0o750);
-    await expect(start(open)).rejects.toThrow(
+    await expect(start(socket(), { jobsRoot: open })).rejects.toThrow(
       "The document service's jobs folder must be yours, mode 0700, not 750",
     );
     // Node reads `*` in a read grant as a wildcard: a grant of <folder>/st*r/x reaches
-    // <folder>/stuff.
-    const starred = path.join(privateFolder(), 'st*r');
-    mkdirSync(starred, { mode: 0o700 });
-    await expect(start(starred)).rejects.toThrow(/may hold only letters, digits/);
-    expect(readdirSync(starred)).toEqual([]);
-  });
-
-  it('starts with a copy beside its socket, clears what a killed service left, and removes it on stop', async () => {
-    const folder = privateFolder();
-    for (const left of ['instante-code-OLD', 'instante-job-OLD']) {
-      mkdirSync(path.join(folder, left));
-      writeFileSync(path.join(folder, left, 'input'), 'an old document');
+    // <folder>/stuff. The socket's folder is the jobs' unless the tests give another.
+    for (const name of ['st*r', 'a,b']) {
+      const special = path.join(privateFolder(), name);
+      mkdirSync(special, { mode: 0o700 });
+      await expect(start(socket(), { jobsRoot: special })).rejects.toThrow(/may not hold a \*/);
+      await expect(start(path.join(special, 'documents.sock'), undefined)).rejects.toThrow(
+        /may not hold a \*/,
+      );
+      expect(readdirSync(special)).toEqual([]);
+      // Judged by its real path, which is what a child's `.` resolves to.
+      const plain = path.join(privateFolder(), 'plain');
+      symlinkSync(special, plain);
+      await expect(start(path.join(plain, 'documents.sock'), undefined)).rejects.toThrow(
+        /may not hold a \*/,
+      );
     }
-    const { sink, lines } = recording();
-    const service = await startDocuments({
-      env: env(path.join(folder, 'documents.sock')),
-      runtime: runtime(['--disable-sigusr1']),
-      sink,
-    });
-    const listening = lines.find((line) => line['event'] === 'documents.listening');
-    const copy = String(listening?.['code']);
+    const spaced = path.join(privateFolder(), 'a b');
+    mkdirSync(spaced, { mode: 0o700 });
+    const service = await start(path.join(spaced, 'documents.sock'), undefined);
     try {
-      expect(listening).toMatchObject({ codeFiles: CHILD_CODE.files.length, removed: 2 });
-      expect(path.dirname(copy)).toBe(folder);
-      expect(readdirSync(folder).sort()).toEqual(['documents.sock', path.basename(copy)].sort());
-      expect(readdirSync(copy, { recursive: true }).sort()).toEqual(
-        ['documents', 'documents/tasks', 'kit', 'package.json', ...CHILD_CODE.files].sort(),
-      );
-      // Node looks for a package.json above a script without checking its grants; this one
-      // stops it in the copy.
-      expect(readFileSync(path.join(copy, 'package.json'), 'utf8')).toBe('{ "type": "module" }\n');
-      expect(statSync(path.join(copy, 'kit/probes.ts')).mode & 0o777).toBe(0o400);
-      expect(readFileSync(path.join(copy, 'kit/probes.ts'), 'utf8')).toBe(
-        readFileSync(path.join(CHILD_CODE.root, 'kit/probes.ts'), 'utf8'),
-      );
+      const reply = await createDocumentsClient(service.socket).run('echo', new Uint8Array());
+      expect(reply.status).toBe(200);
     } finally {
       await service.close();
     }
+  });
+
+  it('takes its jobs’ folder by its real path, the one a child’s grant names', async () => {
+    const folder = privateFolder();
+    const linked = path.join(privateFolder(), 'linked');
+    symlinkSync(folder, linked);
+    const service = await start(path.join(linked, 'documents.sock'), undefined);
+    try {
+      const reply = await createDocumentsClient(service.socket).run('echo', new Uint8Array([1]));
+      expect(reply.status).toBe(200);
+      expect(readdirSync(folder)).toEqual(['documents.sock']);
+    } finally {
+      await service.close();
+    }
+  });
+
+  it('clears the job folders a killed service left once it holds the socket, and not before', async () => {
+    const folder = privateFolder();
+    const socket = path.join(folder, 'documents.sock');
+    const left = path.join(folder, 'instante-job-OLD');
+    mkdirSync(left);
+    writeFileSync(path.join(left, 'input'), 'an old document');
+    const first = await start(socket, undefined);
+    try {
+      // A second service on the same socket is refused before it clears anything.
+      mkdirSync(left);
+      await expect(start(socket, undefined)).rejects.toMatchObject({ code: 'EADDRINUSE' });
+      expect(readdirSync(left)).toEqual([]);
+    } finally {
+      await first.close();
+    }
+    const { sink, lines } = recording();
+    const next = await startDocuments({
+      env: env(socket),
+      runtime: runtime(['--disable-sigusr1']),
+      sink,
+    });
+    await next.close();
+    expect(lines.find((line) => line['event'] === 'documents.listening')).toMatchObject({
+      codeFiles: CHILD_CODE.files.length,
+      removed: 1,
+    });
     expect(readdirSync(folder)).toEqual([]);
   });
 
   it('is needed: through a symlink, inside a grant or anywhere on a path, a child reads what its grants don’t cover, except in a folder whose name nothing else has', async () => {
+    const files = readCode(code);
     const read = async (file: string, grant: string) => {
-      const copy = copyCode(code, privateFolder());
+      const jobFolder = privateFolder();
+      await writeCode(files, jobFolder);
       const done = await runChild({
-        script: path.join(copy, 'test/children/reads.ts'),
+        script: 'code/test/children/reads.ts',
         args: [file],
-        jobFolder: privateFolder(),
-        grants: [copy, grant],
+        jobFolder,
+        grants: [grant],
       });
       return done.ok ? done.stdout.toString() : done.stderr;
     };
@@ -567,14 +575,14 @@ describe('the children’s code', () => {
     expect(path.normalize(via(path.join(grant, 'file')))).toBe(path.join(grant, 'file'));
     expect(await read(via(path.join(grant, 'file')), grant)).toBe('another src folder');
 
-    // A grant whose name nothing else has, like the code's copy and a job's folder: the path
-    // either goes through the real folder or doesn't resolve.
-    const unique = path.join(privateFolder(), 'instante-code-a1b2c3');
+    // A grant whose name nothing else has, like a job's folder: the path either goes through the
+    // real folder or doesn't resolve.
+    const unique = path.join(privateFolder(), 'instante-job-a1b2c3');
     mkdirSync(unique);
     writeFileSync(path.join(unique, 'file'), 'the grant');
     expect(await read(via(path.join(unique, 'file')), unique)).toBe('ENOENT');
-    // Unless someone makes a folder of that name where the kernel lands: the reason the copy's
-    // folder is the owner's alone, with a name no one else learns.
+    // Unless someone makes a folder of that name where the kernel lands: the reason a job's
+    // folder is the owner's alone, and its name never on a command line.
     mkdirSync(twinOf(unique), { recursive: true });
     writeFileSync(path.join(twinOf(unique), 'file'), 'a twin');
     expect(await read(via(path.join(unique, 'file')), unique)).toBe('a twin');

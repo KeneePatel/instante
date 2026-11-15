@@ -1,33 +1,28 @@
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  mkdirSync,
-  mkdtempSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// The code the document service's children may read (docs/specs/platform.md, "documents"): a
-// copy, made at each start, in a folder of its own that only it names.
+// The code the document service's children may read (docs/specs/platform.md, "documents"): read
+// once at start, and written into each job's own folder, the one folder a child may read.
 //
 // Node's permission model checks a path after removing `name/..` as text, while the kernel
 // follows every symlink along the path, wherever it is. So a grant only holds if the kernel can
 // reach a path inside it in one way: the folder's last name must exist nowhere else (mkdtemp's
-// random one, which no one else knows), and the folder must hold no symlink. Then a path whose
-// text ends inside the copy can only have gone through the real folder, and from there the
-// kernel and the text move together. The installed packages and the checkout can't meet that:
-// pnpm's links, here and in any other project, steer the kernel to other folders named `src` or
-// `.pnpm`.
+// random one), and the folder must hold no symlink. Then a path whose text ends inside the job's
+// folder can only have gone through the real folder, and from there the kernel and the text
+// move together. The checkout and the installed packages can't meet that: pnpm's links, here and
+// in any other project, steer the kernel to other folders named `src` or `.pnpm`. The job's
+// folder is granted as `.`, its working folder, and the script named from there, so its name
+// never reaches the child's command line, which every local account can read (`ps`); no one
+// else can plant a folder of a name they never learn.
 
 /** The children's code: each task's script and what it imports (Node's built-ins aside), as
  * paths inside `root`, a real path. */
 export type Code = { root: string; files: readonly string[] };
+
+/** The code as read at start: each file's path inside it, and its bytes. */
+export type CodeFiles = ReadonlyMap<string, Buffer>;
 
 /** The backend's source, by real path. */
 export const SOURCE = realpathSync.native(fileURLToPath(new URL('../', import.meta.url)));
@@ -38,66 +33,71 @@ export const CHILD_CODE: Code = {
   files: ['documents/tasks/echo.ts', 'documents/tasks/selftest.ts', 'kit/probes.ts'],
 };
 
-/** Copies `code` into a new folder under `parent` (a real path the owner alone can enter): each
- * file new, the owner's alone to read, beside a package.json that makes them ES modules, since
- * Node looks for one in the folders above a script without checking its grants. Only regular
- * files with one link are copied, read without following a link. Throws, leaving nothing behind,
- * on anything else. Returns the copy's real path. */
-export function copyCode(code: Code, parent: string): string {
-  const copy = mkdtempSync(path.join(parent, 'instante-code-'));
-  try {
-    const problems = code.files.flatMap((file) => copyFile(code.root, file, copy));
-    if (problems.length > 0) {
-      throw new Error(
-        `The document service won't give its children this code:\n${problems.join('\n')}`,
-      );
-    }
-    writeFileSync(path.join(copy, 'package.json'), '{ "type": "module" }\n', {
-      flag: 'wx',
-      mode: 0o400,
-    });
-    return copy;
-  } catch (error) {
-    rmSync(copy, { recursive: true, force: true });
-    throw error;
+/** The folder, inside a job's, that holds its code. */
+export const CODE_FOLDER = 'code';
+
+/** Reads `code`: only regular files with one link, reached through no symlink, each opened
+ * without following one. Throws, naming each problem, on anything else. */
+export function readCode(code: Code): CodeFiles {
+  const files = new Map<string, Buffer>();
+  const problems: string[] = [];
+  for (const file of code.files) {
+    const read = readOne(code.root, file);
+    if (typeof read === 'string') problems.push(read);
+    else files.set(file, read);
   }
+  if (problems.length > 0) {
+    throw new Error(
+      `The document service won't give its children this code:\n${problems.join('\n')}`,
+    );
+  }
+  return files;
 }
 
-/** Copies one file, or says why it won't. */
-function copyFile(root: string, file: string, copy: string): string[] {
+/** One file's bytes, or why it won't be given. */
+function readOne(root: string, file: string): Buffer | string {
   const source = path.join(root, file);
   if (path.isAbsolute(file) || path.normalize(file) !== file || file.startsWith('..')) {
-    return [`${file} isn't a plain path inside ${root}`];
+    return `${file} isn't a plain path inside ${root}`;
   }
-  let real: string;
-  try {
-    real = realpathSync.native(source);
-  } catch {
-    return [`${source} isn't there`];
-  }
-  // A link on the way would make the copy hold another file's bytes.
-  if (real !== source) return [`${source} is reached through a symlink, to ${real}`];
   let fd: number;
   try {
-    // Non-blocking, so a FIFO doesn't hang the start waiting for a writer.
+    // Not following a link, and not blocking on a FIFO waiting for a writer.
     fd = openSync(source, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  } catch {
-    return [`${source} can't be opened as a file`];
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ELOOP') return `${source} is a symlink`;
+    if (code === 'ENOENT') return `${source} isn't there`;
+    return `${source} can't be opened as a file`;
   }
   try {
     const stat = fstatSync(fd);
-    if (!stat.isFile()) return [`${source} isn't a regular file`];
-    if (stat.nlink !== 1) return [`${source} has ${String(stat.nlink)} links`];
-    mkdirSync(path.dirname(path.join(copy, file)), { recursive: true, mode: 0o700 });
-    writeFileSync(path.join(copy, file), readFileSync(fd), { flag: 'wx', mode: 0o400 });
-    return [];
+    if (!stat.isFile()) return `${source} isn't a regular file`;
+    if (stat.nlink !== 1) return `${source} has ${String(stat.nlink)} links`;
+    // A link on the way would give the children another file's bytes.
+    const real = realpathSync.native(source);
+    if (real !== source) return `${source} is reached through a symlink, to ${real}`;
+    return readFileSync(fd);
   } finally {
     closeSync(fd);
   }
 }
 
-/** Where a task's script is in the copy, if `code` holds it. */
-export function inCopy(code: Code, copy: string, script: string): string | undefined {
+/** Writes `files` into `<folder>/code/`: each file new, the owner's alone to read, beside a
+ * package.json making them ES modules, since Node looks for one in the folders above a script
+ * without checking its grants. */
+export async function writeCode(files: CodeFiles, folder: string): Promise<void> {
+  const top = path.join(folder, CODE_FOLDER);
+  const write = async (file: string, bytes: Uint8Array) => {
+    await mkdir(path.dirname(path.join(top, file)), { recursive: true, mode: 0o700 });
+    await writeFile(path.join(top, file), bytes, { flag: 'wx', mode: 0o400 });
+  };
+  for (const [file, bytes] of files) await write(file, bytes);
+  await write('package.json', new TextEncoder().encode('{ "type": "module" }\n'));
+}
+
+/** A task's script as its child names it, from its job's folder, if `code` holds it. */
+export function scriptIn(code: Code, script: string): string | undefined {
   const file = path.relative(code.root, script);
-  return code.files.includes(file) ? path.join(copy, file) : undefined;
+  return code.files.includes(file) ? path.join(CODE_FOLDER, file) : undefined;
 }

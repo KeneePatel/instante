@@ -171,13 +171,15 @@ describe('floor-guard', () => {
     expect(output).toContain('[assertion-removed] src/kept.test.ts');
   });
 
-  it('lets a deleted test and removed assertions through when a commit says why, for that file only', () => {
+  it('lets a deleted test and removed assertions through when the commit that removes them says why, for that file only', () => {
     const repo = makeRepo({
       'src/gone.test.ts': "it('a', () => { expect(1).toBe(1); });\n",
+      'src/also.test.ts': "it('d', () => { expect(5).toBe(5); });\n",
       'src/kept.test.ts': "it('b', () => {\n  expect(2).toBe(2);\n  expect(3).toBe(3);\n});\n",
       'src/other.test.ts': "it('c', () => {\n  expect(4).toBe(4);\n});\n",
     });
     repo.remove('src/gone.test.ts');
+    repo.remove('src/also.test.ts');
     repo.write('src/kept.test.ts', "it('b', () => {\n  expect(2).toBe(2);\n});\n");
     repo.write('src/other.test.ts', "it('c', () => {});\n");
     repo.commit(
@@ -186,8 +188,8 @@ describe('floor-guard', () => {
         '',
         'Tests removed from src/gone.test.ts: the feature it tested is gone',
         'Tests removed from src/kept.test.ts: three is no longer a case',
-        // Too short to be a reason, so it counts for nothing.
-        'Tests removed from src/other.test.ts: gone',
+        // Nine characters: too short to be a reason, so it counts for nothing.
+        'Tests removed from src/other.test.ts: obsolete.',
       ].join('\n'),
     );
     const { status, output } = repo.run(guard);
@@ -200,21 +202,52 @@ describe('floor-guard', () => {
     );
     expect(output).not.toContain('[test-deleted] src/gone.test.ts');
     expect(output).not.toContain('[assertion-removed] src/kept.test.ts');
+    // Deleted in the same commit, but not named in it.
+    expect(output).toContain('[test-deleted] src/also.test.ts');
     expect(output).toContain('[assertion-removed] src/other.test.ts');
-    expect(output).toContain('`Tests removed from <file>: <reason>`');
+    expect(output).toContain('`Tests removed from <file>: <reason>`, ten characters or more');
   });
 
-  it('needs the reason in a commit: a change not yet committed is flagged', () => {
+  it('vouches only for what the commit giving the reason removes: not a later commit’s, nor an uncommitted change', () => {
     const repo = makeRepo({
-      'src/kept.test.ts': "it('b', () => {\n  expect(2).toBe(2);\n  expect(3).toBe(3);\n});\n",
+      'src/kept.test.ts':
+        "it('b', () => {\n  expect(2).toBe(2);\n  expect(3).toBe(3);\n  expect(4).toBe(4);\n});\n",
     });
-    repo.commit(
-      'Tests removed from src/elsewhere.test.ts: a different file, so it counts for nothing',
+    repo.write(
+      'src/kept.test.ts',
+      "it('b', () => {\n  expect(2).toBe(2);\n  expect(4).toBe(4);\n});\n",
     );
+    repo.commit('Drop three\n\nTests removed from src/kept.test.ts: three is no longer a case');
     repo.write('src/kept.test.ts', "it('b', () => {\n  expect(2).toBe(2);\n});\n");
+    repo.commit('Drop four as well');
+    repo.write('src/kept.test.ts', "it('b', () => {});\n");
     const { status, output } = repo.run(guard);
     expect(status).toBe(1);
-    expect(output).toContain('[assertion-removed] src/kept.test.ts');
+    expect(output).not.toContain('expect(3)');
+    expect(output).toContain('[assertion-removed] src/kept.test.ts: expect(4).toBe(4);');
+    expect(output).toContain('[assertion-removed] src/kept.test.ts: expect(2).toBe(2);');
+  });
+
+  it('flags a test file deleted by a later commit than the one naming it', () => {
+    const repo = makeRepo({ 'src/gone.test.ts': "it('a', () => { expect(1).toBe(1); });\n" });
+    repo.write('src/note.md', 'a change that deletes nothing\n');
+    repo.commit('Plan\n\nTests removed from src/gone.test.ts: about to go, but not in this commit');
+    repo.remove('src/gone.test.ts');
+    repo.commit('Drop it');
+    const { status, output } = repo.run(guard);
+    expect(status).toBe(1);
+    expect(output).toContain('[test-deleted] src/gone.test.ts');
+  });
+
+  it('ignores a reason given before the branch, or not at a line’s start', () => {
+    const repo = makeRepo({ 'src/gone.test.ts': "it('a', () => { expect(1).toBe(1); });\n" });
+    repo.commit('Tests removed from src/gone.test.ts: said before the branch began');
+    repo.git(['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+    repo.remove('src/gone.test.ts');
+    repo.commit('Drop it\n\n  Tests removed from src/gone.test.ts: indented, so not a reason line');
+    const { status, output } = repo.run(guard);
+    expect(status).toBe(1);
+    expect(output).toContain('[test-deleted] src/gone.test.ts');
   });
 
   it('does not flag an assertion that only moved', () => {
