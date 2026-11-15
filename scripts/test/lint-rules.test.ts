@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 // The lint rules the platform spec names, tried on code they must refuse and code they must
 // let through, with the untyped config `check:fast` uses (the typed one adds to it).
@@ -14,6 +14,12 @@ const DOCUMENTS = [
   'apps/backend/src/documents/probe.ts',
   'apps/backend/src/documents/tasks/probe.ts',
 ];
+
+// ESLint loads its config, Next.js's included, at the first lint: seconds on a busy machine, so
+// it's done here, before the tests' own clocks start.
+beforeAll(async () => {
+  await eslint.lintText('', { filePath: 'apps/backend/src/documents/probe.ts' });
+}, 60_000);
 
 /** Which of the two restricting rules fire on `code` placed at `file`, each once. */
 async function fired(code: string, file: string): Promise<string[]> {
