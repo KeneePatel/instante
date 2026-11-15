@@ -36,8 +36,11 @@ const DOCUMENTS_PATHS = [
     message: `${SPAWN_ONLY} It loads no module by a name it builds, and forks nothing.`,
   })),
 ];
-// The names that load a built-in module from a string, round an import.
+// The names that load a built-in module from a string, round an import: refused on any object,
+// and however they're named, so an alias or a destructuring is caught too.
 const LOADERS = '/^(getBuiltinModule|binding|_linkedBinding)$/';
+// A shell, named as the program to start.
+const SHELLS = '/(^|\\/)(env|sh|bash|dash|zsh|ksh|csh|tcsh|fish)$/';
 
 const layerRules = LAYERS.map((layer, i) => ({
   files: [`apps/backend/src/${layer}/**/*.ts`],
@@ -108,12 +111,16 @@ export const untypedConfig = defineConfig([
         },
         {
           selector:
-            "ImportExpression[source.value=/child_process$/], ImportExpression:not([source.type='Literal'])",
-          message: `${SPAWN_ONLY} No dynamic import of child_process, or of a name built at run time.`,
+            "ImportExpression[source.value=/^(node:)?(child_process|module|cluster)$/], ImportExpression:not([source.type='Literal'])",
+          message: `${SPAWN_ONLY} No dynamic import of child_process, node:module or node:cluster, or of a name built at run time.`,
         },
         {
-          selector: `MemberExpression:matches([property.name=${LOADERS}], [property.value=${LOADERS}])`,
+          selector: `Identifier[name=${LOADERS}], Literal[value=${LOADERS}], TemplateElement[value.cooked=${LOADERS}]`,
           message: `${SPAWN_ONLY} No built-in module loaded by name either.`,
+        },
+        {
+          selector: `CallExpression[callee.name=/^(spawn|execFile)$/][arguments.0.value=${SHELLS}]`,
+          message: `${SPAWN_ONLY} Never a shell as the program: it starts process.execPath, or a tool by its full path.`,
         },
       ],
     },

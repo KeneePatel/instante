@@ -82,13 +82,16 @@ describe('package.json files', () => {
 
 describe('the backend’s source', () => {
   it('is all .ts, the files its lint rules (the layers, and the document service’s ban) cover', () => {
-    const others = readdirSync(new URL('apps/backend/src/', root), {
-      recursive: true,
-      withFileTypes: true,
-    })
-      .filter((entry) => !entry.isDirectory() && !entry.name.endsWith('.ts'))
-      .map((entry) => entry.name);
-    expect(others).toEqual([]);
+    // Tracked and added files, as git lists them, so Finder's ignored .DS_Store doesn't count.
+    const files = execFileSync(
+      'git',
+      ['ls-files', '--cached', '--others', '--exclude-standard', '-z', 'apps/backend/src'],
+      { cwd: new URL('.', root), encoding: 'utf8' },
+    )
+      .split('\0')
+      .filter((file) => file !== '');
+    expect(files.length).toBeGreaterThan(10);
+    expect(files.filter((file) => !file.endsWith('.ts'))).toEqual([]);
   });
 });
 

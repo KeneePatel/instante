@@ -244,7 +244,7 @@
       - `lsof` reports no locks on macOS, so there a lock file shows only as a regular file, which its type refuses;
       - through a symlink inside its grant, a child reads a file outside it, which a test shows;
     - on CI's ubuntu-24.04 runner, every `selftest` test passes too. That includes the service started from `main.ts` holding fd 9, so there too `lsof` is present, the child's descriptors are only Node's own, and the inherited lock file doesn't reach the child (on Linux, Node's start-up sweep marks inherited descriptors close-on-exec).
-  - **Review (fixed):** six reviewers (escape, false passes, the walk and the install, the lint ban, mutations, the spec), a skeptic per finding and a critic; 38 of 48 findings held:
+  - **Review (fixed):** six reviewers (escape, false passes, the walk and the install, the lint ban, mutations, the spec), a skeptic per finding and a critic; 39 of 48 findings held, three of them the same climb:
     - **the walk let a child climb out (high):** the permission model checks a path after removing `link/..` as text, while the kernel climbs from where the link points. So `..` after a link to a folder higher up its grant left the grants while the path still read as inside, and a child read the repository's `.git` and, with enough `..`, any file the owner can. The walk now refuses a link to a folder nearer the top of its grant than the link sits in its own; pnpm's links all point as deep or deeper. The test that passed `a/to-folder -> ../b` now expects it refused, and a test shows a child really climbing out. The owner's checkout held one such link, left by an earlier experiment, and a self-link beside it; both are gone;
     - **the walk judged a link by text (medium):** Node's JS `realpathSync` removes `..` as text too, so a link through a symlink outside the grants and then `..` read as inside. The walk, and the grants, now use `realpathSync.native`;
     - **the lint ban (medium):** `process.getBuiltinModule`, `createRequire`, `cluster.fork`, `import()` of a computed name, and `shell` set as a member or named by a string or template all got through. The ban now refuses each; the test titles and these notes no longer claim it sees every way round;
@@ -360,7 +360,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
     - the cluster has no TCP listener and refuses a connection without a password;
     - the modes are `0700` and `0600`, and the locale is pinned (part of platform spec 9);
     - `setup` is refused when the home exists, and the default home is refused under other spellings.
-  - **Verify:** `pnpm test:local -- setup`; the macOS job.
+  - **Verify:** `pnpm test:local setup`; the macOS job.
   - **Depends on:** T10, T19. **Files:** `scripts/local/{instante,lib.sh,setup.sh}`, `scripts/local/test/setup.test.ts`, plus edits to `vitest.config.ts`, `package.json` and `ci.yml`. **Size:** M.
 
 - [ ] **T21: `release`** (**review:** `release`'s checks)
@@ -377,7 +377,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
     - `setup`'s final step, releasing the clone's own commit;
     - the local bare repository and the GitHub API stub for test mode.
   - **Acceptance:** each refusal in platform spec 14 (the "Instante is running" case tested by holding the lock), and a failed build leaves `current` unchanged.
-  - **Verify:** `pnpm test:local -- release`.
+  - **Verify:** `pnpm test:local release`.
   - **Depends on:** T20. **Files:** `scripts/local/release.sh`, `scripts/local/setup.sh`, `scripts/local/test/{github-stub,release.test}.ts`. **Size:** M.
 
 - [ ] **T22: `start`, `stop` and `status`**
@@ -397,7 +397,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
     - every listener is on loopback;
     - a second `start` is refused, `HUP` stops everything, and `stop` cleans up after a killed launcher;
     - logs keep 10 starts.
-  - **Verify:** `pnpm test:local -- start`; the macOS job.
+  - **Verify:** `pnpm test:local start`; the macOS job.
   - **Depends on:** T21. **Files:** `scripts/local/{start,stop,status}.sh`, `scripts/local/test/start.test.ts`. **Size:** M.
 
 - [ ] **T23: `rollback`, `backup` and `restore`** (**review:** `restore`)
@@ -410,7 +410,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
       - grants and settings applied again, then `ANALYZE`;
     - `start` dropping `instante_old` after the swap.
   - **Acceptance:** a `backup` then `restore` gives back the same rows, grants and settings; after a release that adds `0002_skeleton.sql`, `rollback` returns to a release that starts (the rest of platform spec 14, and part of 15).
-  - **Verify:** `pnpm test:local -- restore`.
+  - **Verify:** `pnpm test:local restore`.
   - **Depends on:** T22. **Files:** `scripts/local/{rollback,backup,restore}.sh`, `scripts/local/start.sh`, `scripts/local/test/restore.test.ts`. **Size:** M.
 
 - [ ] **T24: `instante cli` and the macOS job's full checks**

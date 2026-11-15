@@ -60,15 +60,32 @@ describe('the document service never uses exec, a shell or fork', () => {
     ]);
   });
 
+  it('refuses a shell started as the program, by its path or its name', async () => {
+    await refusedBy('no-restricted-syntax', [
+      "import { spawn } from 'node:child_process';\nspawn('/bin/sh', ['-c', 'ls'], { shell: false });",
+      "import { execFile } from 'node:child_process';\nexecFile('bash', ['-c', 'ls']);",
+      "import { spawn } from 'node:child_process';\nspawn('/usr/bin/env', ['sh', '-c', 'ls']);",
+      "import { spawn } from 'node:child_process';\nspawn('/opt/homebrew/bin/fish', ['-c', 'ls']);",
+    ]);
+  });
+
   it('refuses a dynamic import of child_process, or of any name built at run time, and a built-in loaded by name', async () => {
     await refusedBy('no-restricted-syntax', [
       "await import('node:child_process');",
       "await import('child_process');",
+      "await import('node:module');",
+      "await import('module');",
+      "await import('node:cluster');",
+      "await import('cluster');",
       'await import(`node:child_process`);',
       "const name = 'node:child_process';\nawait import(name);",
       "process.getBuiltinModule('node:child_process');",
       "process['getBuiltinModule']('node:child_process');",
+      'process[`getBuiltinModule`](`node:child_process`);',
+      "const { getBuiltinModule } = process;\ngetBuiltinModule('node:child_process');",
+      "const load = Reflect.get(process, 'getBuiltinModule');\nvoid load;",
       "process.binding('spawn_sync');",
+      "process._linkedBinding('spawn_sync');",
     ]);
   });
 
@@ -76,7 +93,7 @@ describe('the document service never uses exec, a shell or fork', () => {
     for (const file of DOCUMENTS) {
       expect(
         await fired(
-          "import { execFile, spawn } from 'node:child_process';\nspawn('/usr/sbin/lsof', [], { shell: false });\nspawn('/usr/sbin/lsof', [], { 'shell': false });\nexecFile('/usr/sbin/lsof', []);\nawait import('./run-child.ts');",
+          "import { execFile, spawn } from 'node:child_process';\nspawn(process.execPath, ['task.ts'], { shell: false });\nspawn('/usr/sbin/lsof', [], { 'shell': false });\nexecFile('/usr/sbin/lsof', []);\nawait import('./run-child.ts');",
           file,
         ),
       ).toEqual([]);

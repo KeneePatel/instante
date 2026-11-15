@@ -354,6 +354,7 @@ describe('serviceFacts', () => {
     expect(facts('jdbc:postgresql://localhost/instante')).toBe(true);
     expect(facts('http://postgres.example')).toBe(false);
     expect(facts('postgres')).toBe(false);
+    expect(facts('postgres:5432')).toBe(false);
   });
 
   it('finds a secret file’s path: a name ending in _FILE, or a value inside the secrets folder', () => {

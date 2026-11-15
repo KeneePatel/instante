@@ -117,8 +117,15 @@ describe('the probes, where nothing stops them', () => {
     // A socket that is never connected, and a lookup that never answers.
     fake.connect = () => new Socket();
     fake.lookup = () => new Promise(() => undefined);
-    const answers = Promise.all([probeTcp(port), probeUnixSocket('/nowhere'), probeLookup()]);
-    await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS);
+    let settled = 0;
+    const answers = Promise.all(
+      [probeTcp(port), probeUnixSocket('/nowhere'), probeLookup()].map((answer) =>
+        answer.finally(() => (settled += 1)),
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS - 1);
+    expect(settled).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
     expect(await answers).toEqual(['failed: timeout', 'failed: timeout', 'failed: timeout']);
   });
 });
