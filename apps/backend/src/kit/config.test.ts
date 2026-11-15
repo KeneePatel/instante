@@ -5,7 +5,9 @@ import {
   ConfigError,
   MAX_SOCKET_PATH_BYTES,
   PINNED_NODE,
+  allowedNames,
   loadConfig,
+  optionNames,
   processRuntime,
   type Runtime,
 } from './config.ts';
@@ -534,6 +536,27 @@ describe('loadConfig', () => {
   it("pins the same Node as mise.toml, so the guard can't drift from the tools", () => {
     const mise = readFileSync(new URL('../../../../mise.toml', import.meta.url), 'utf8');
     expect(PINNED_NODE).toBe(`v${/node = "([^"]+)"/.exec(mise)?.[1] ?? ''}`);
+  });
+});
+
+describe('allowedNames', () => {
+  it("gives each role every setting but those it refuses: the document service's has no secret, database or port", () => {
+    expect(allowedNames('documents')).toEqual([
+      'INSTANTE_ENV',
+      'ROLE',
+      'INSTANTE_HOME',
+      'DOCUMENTS_SOCKET',
+    ]);
+    expect(allowedNames('all')).not.toContain('OWNER_DATABASE_URL_FILE');
+    expect(allowedNames('cli')).toContain('OWNER_DATABASE_URL_FILE');
+  });
+});
+
+describe('optionNames', () => {
+  it('reads each flag as Node does: its name alone, with `_` as `-`', () => {
+    expect(
+      optionNames(['--disable_sigusr1', '--no-disable-sigusr1=false', '--inspect=9229']),
+    ).toEqual(['--disable-sigusr1', '--no-disable-sigusr1', '--inspect']);
   });
 });
 

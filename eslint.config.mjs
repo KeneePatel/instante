@@ -19,12 +19,24 @@ const NO_TEST_IMPORTS = {
 const LAYERS = ['kit', 'domain', 'ai', 'documents', 'sources', 'store', 'engine'];
 const ENTRY_POINTS = ['api', 'worker', 'cli'];
 
+// The document service starts processes with spawn or execFile, never exec, a shell or fork
+// (docs/specs/platform.md, "documents"). Only those two may be imported: a default or
+// namespace import, or a re-export, is refused as well.
+const SPAWN_ONLY = 'The document service starts processes with spawn or execFile only.';
+const DOCUMENTS_PATHS = ['node:child_process', 'child_process'].map((name) => ({
+  name,
+  allowImportNames: ['spawn', 'execFile'],
+  message: SPAWN_ONLY,
+}));
+
 const layerRules = LAYERS.map((layer, i) => ({
   files: [`apps/backend/src/${layer}/**/*.ts`],
   rules: {
     'no-restricted-imports': [
       'error',
       {
+        // One rule entry per file set: a later entry would replace these patterns, not add to them.
+        paths: layer === 'documents' ? DOCUMENTS_PATHS : [],
         patterns: [
           {
             regex: `(^|/)(${[...LAYERS.slice(i + 1), ...ENTRY_POINTS].join('|')})/`,
@@ -68,6 +80,23 @@ export const untypedConfig = defineConfig([
     rules: { 'no-restricted-imports': ['error', { patterns: [NO_TEST_IMPORTS] }] },
   },
   ...layerRules,
+  {
+    files: ['apps/backend/src/documents/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "Property:matches([key.name='shell'], [key.value='shell']):not([value.value=false])",
+          message: `${SPAWN_ONLY} Never through a shell: \`shell\` may only be false.`,
+        },
+        {
+          selector: 'ImportExpression[source.value=/child_process$/]',
+          message: `${SPAWN_ONLY} No dynamic import of child_process either.`,
+        },
+      ],
+    },
+  },
 ]);
 
 export default defineConfig([

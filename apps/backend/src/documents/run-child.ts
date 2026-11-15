@@ -8,7 +8,8 @@ import { spawn } from 'node:child_process';
 // - no node:sqlite, and V8's flags frozen once it starts: both write files the permission model
 //   doesn't check (node:sqlite its databases; V8 its traces, through v8.setFlagsFromString);
 // - an empty environment, so no NODE_OPTIONS and nothing of the service's own;
-// - three pipes and nothing else: no IPC channel, no other file descriptor;
+// - three pipes and nothing else: no IPC channel, no other file descriptor; stdin ends at once,
+//   or for `selftest` once the service has listed the child's open files;
 // - 30 seconds, then a kill.
 
 /** The children's time limit (docs/architecture.md, "Limits"). */
@@ -34,6 +35,10 @@ export type ChildRun = {
   maxOutputBytes?: number;
   /** Kills the child when aborted, as when the service stops. */
   signal?: AbortSignal;
+  /** Called with the child's process id when its first output arrives. Until the promise
+   * settles, the child's stdin stays open, so a child that reads it to its end waits; without
+   * this, stdin ends at once. `selftest` uses it to list the child's open files. */
+  onOutput?: (pid: number) => Promise<void>;
 };
 
 export type ChildResult =
@@ -47,8 +52,8 @@ export type ChildResult =
       ms: number;
     };
 
-/** The child's command line after `process.execPath`: its flags, then the script. */
-export function childArgs(run: Pick<ChildRun, 'script' | 'args' | 'jobFolder' | 'grants'>) {
+/** The child's flags: what its `process.execArgv` must be. */
+export function childFlags(run: Pick<ChildRun, 'jobFolder' | 'grants'>): string[] {
   return [
     '--permission',
     '--disable-sigusr1',
@@ -56,9 +61,12 @@ export function childArgs(run: Pick<ChildRun, 'script' | 'args' | 'jobFolder' | 
     '--no-experimental-sqlite',
     '--freeze-flags-after-init',
     ...[run.jobFolder, ...run.grants].map((path) => `--allow-fs-read=${path}`),
-    run.script,
-    ...run.args,
   ];
+}
+
+/** The child's command line after `process.execPath`: its flags, then the script. */
+export function childArgs(run: Pick<ChildRun, 'script' | 'args' | 'jobFolder' | 'grants'>) {
+  return [...childFlags(run), run.script, ...run.args];
 }
 
 /** Runs one task's child to its end, its time limit or its output limit. Never rejects for
@@ -74,10 +82,15 @@ export function runChild(run: ChildRun): Promise<ChildResult> {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
     });
-    child.stdin.end();
+    // Once the child has exited, Node has destroyed its stdin, and ending it does nothing.
+    const endStdin = () => {
+      child.stdin.end();
+    };
+    if (run.onOutput === undefined) endStdin();
 
     const out: Buffer[] = [];
     let outBytes = 0;
+    let heard = false;
     const err: Buffer[] = [];
     let errBytes = 0;
     let stopped: 'timed_out' | 'too_much_output' | 'stopped' | undefined;
@@ -95,6 +108,10 @@ export function runChild(run: ChildRun): Promise<ChildResult> {
     else run.signal?.addEventListener('abort', onAbort, { once: true });
 
     child.stdout.on('data', (chunk: Buffer) => {
+      if (!heard && run.onOutput !== undefined && child.pid !== undefined) {
+        heard = true;
+        void run.onOutput(child.pid).then(endStdin, endStdin);
+      }
       outBytes += chunk.length;
       if (outBytes > maxOutputBytes) stop('too_much_output');
       else out.push(chunk);

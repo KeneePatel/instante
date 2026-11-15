@@ -274,6 +274,57 @@ describe('runChild', () => {
   });
 });
 
+describe('runChild’s onOutput', () => {
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const run = (name: string, onOutput?: (pid: number) => Promise<void>, timeoutMs?: number) =>
+    runChild({
+      script: child(name),
+      args: [],
+      jobFolder: privateFolder(),
+      grants: [children],
+      ...(onOutput === undefined ? {} : { onOutput }),
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    });
+
+  it('runs at the first output, and keeps stdin open until it settles, with the child still there', async () => {
+    const calls: { pid: number; alive: boolean }[] = [];
+    const done = await run('waits', async (pid) => {
+      await sleep(300);
+      calls.push({ pid, alive: alive(pid) });
+    });
+    expect(done.ok && done.stdout.toString()).toBe('before after');
+    expect(calls).toEqual([{ pid: expect.any(Number) as unknown, alive: true }]);
+  });
+
+  it('ends stdin at once without it, and once it fails as when it succeeds', async () => {
+    const at = performance.now();
+    const quick = await run('waits');
+    expect(quick.ok && quick.stdout.toString()).toBe('before after');
+    expect(performance.now() - at).toBeLessThan(2_000);
+    const failed = await run('waits', () => Promise.reject(new Error('lsof failed')));
+    expect(failed.ok && failed.stdout.toString()).toBe('before after');
+  });
+
+  it('ends stdin harmlessly after a child that has already gone', async () => {
+    const done = await run('quick', async () => {
+      await sleep(300);
+    });
+    expect(done.ok && done.stdout.toString()).toBe('done');
+  });
+
+  it('still kills a child at its time limit while it never settles', async () => {
+    const done = await run('waits', () => new Promise<void>(() => undefined), 1_000);
+    expect(done).toMatchObject({ ok: false, reason: 'timed_out', signal: 'SIGKILL' });
+  });
+});
+
 describe('grantedCode', () => {
   it('is the backend source, packages/contract and node_modules/.pnpm, by real path', () => {
     expect(grantedCode()).toEqual([

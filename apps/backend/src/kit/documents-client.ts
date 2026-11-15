@@ -1,4 +1,6 @@
 import { request } from 'node:http';
+import { z } from 'zod';
+import { PROBES, probeLookup, probeTcp, type Probe, type SelftestTargets } from './probes.ts';
 
 // The backend's client for the document service (docs/specs/platform.md, "kit"): node:http over
 // DOCUMENTS_SOCKET, with a total 25-second deadline, under the web app's 30-second rewrite
@@ -31,6 +33,53 @@ const MESSAGES: Record<DocumentsError['reason'], string> = {
   too_large: 'sent too large a reply',
 };
 
+const ProbeSchema = z.custom<Probe>(
+  (value) =>
+    value === 'denied' ||
+    value === 'allowed' ||
+    (typeof value === 'string' && value.startsWith('failed: ')),
+);
+
+/** What `selftest`'s child reports (documents/tasks/selftest.ts). */
+export const ChildReportSchema = z.strictObject({
+  execArgv: z.array(z.string()),
+  env: z.array(z.string()),
+  probes: z.strictObject(
+    Object.fromEntries(PROBES.map((name) => [name, ProbeSchema])) as Record<
+      (typeof PROBES)[number],
+      typeof ProbeSchema
+    >,
+  ),
+});
+
+/** The document service's `selftest` reply (documents/guards.ts). */
+export const SelftestReplySchema = z.strictObject({
+  ok: z.boolean(),
+  /** Each check that failed, in words; empty when `ok`. */
+  problems: z.array(z.string()),
+  /** The service's own process: names, never values. */
+  service: z.strictObject({
+    extraNames: z.array(z.string()),
+    databaseUrl: z.boolean(),
+    secretFile: z.boolean(),
+    disableSigusr1: z.boolean(),
+  }),
+  /** The child's report, or null if it sent none that parses. */
+  child: ChildReportSchema.nullable(),
+  /** The child's descriptors beyond its pipes and Node's own, as `lsof` named them. */
+  openFiles: z.array(z.string()),
+});
+export type SelftestReply = z.infer<typeof SelftestReplySchema>;
+
+export type SelftestResult = {
+  ok: boolean;
+  problems: string[];
+  /** The backend's own probes, which must be allowed. */
+  positiveControl: { tcp: Probe; lookup: Probe };
+  /** The service's reply, if it sent one that parses. */
+  documents: SelftestReply | undefined;
+};
+
 export type DocumentsClient = {
   /** Runs a task on the input; resolves with any reply, and rejects only with DocumentsError. */
   run: (
@@ -40,6 +89,10 @@ export type DocumentsClient = {
   ) => Promise<DocumentReply>;
   /** Whether the service answers: `echo` of nothing, checked exactly, within READY_DEADLINE_MS. */
   answers: () => Promise<boolean>;
+  /** `selftest` (docs/specs/platform.md, "documents"): the service's checks and its child's
+   * probes of the targets, which must all be denied, beside this process's own probes of the
+   * backend's port and `localhost`, which must succeed. Never rejects. */
+  selftest: (targets: SelftestTargets) => Promise<SelftestResult>;
 };
 
 export function createDocumentsClient(
@@ -119,6 +172,36 @@ export function createDocumentsClient(
       } catch {
         return false;
       }
+    },
+    selftest: async (targets) => {
+      const [tcp, lookup] = await Promise.all([probeTcp(targets.port), probeLookup()]);
+      const problems: string[] = [];
+      if (tcp !== 'allowed') problems.push(`the backend couldn't reach its own port: ${tcp}`);
+      if (lookup !== 'allowed') problems.push(`the backend couldn't look up localhost: ${lookup}`);
+      let documents: SelftestReply | undefined;
+      try {
+        const reply = await run('selftest', new TextEncoder().encode(JSON.stringify(targets)));
+        const parsed =
+          reply.status === 200
+            ? SelftestReplySchema.safeParse(JSON.parse(reply.body.toString('utf8')))
+            : undefined;
+        if (parsed === undefined) {
+          problems.push(`the document service answered selftest with ${String(reply.status)}`);
+        } else if (!parsed.success) {
+          problems.push("the document service's selftest reply doesn't parse");
+        } else {
+          documents = parsed.data;
+          problems.push(...documents.problems);
+          if (!documents.ok && documents.problems.length === 0) {
+            problems.push('the document service failed its selftest without saying why');
+          }
+        }
+      } catch (error) {
+        problems.push(
+          error instanceof DocumentsError ? error.message : "the selftest reply isn't JSON",
+        );
+      }
+      return { ok: problems.length === 0, problems, positiveControl: { tcp, lookup }, documents };
     },
   };
 }

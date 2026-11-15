@@ -11,25 +11,44 @@ import { bodyLimit } from 'hono/body-limit';
 import { systemClock, type Clock } from '../kit/clock.ts';
 import { loadConfig, processRuntime, type Runtime } from '../kit/config.ts';
 import { createLogger, type Logger, type Sink } from '../kit/logger.ts';
-import { CHILD_TIMEOUT_MS, runChild } from './run-child.ts';
+import {
+  checkGrantedCode,
+  checkJobFolder,
+  listOpenFiles,
+  selftestReply,
+  serviceFacts,
+  type OpenFile,
+  type ProcessFacts,
+} from './guards.ts';
+import { CHILD_TIMEOUT_MS, childFlags, runChild } from './run-child.ts';
 
 // The document service (docs/specs/platform.md, "documents"; ROLE=documents): a Hono app on the
 // Unix socket DOCUMENTS_SOCKET, with no TCP port and one route, POST /run/:task. It holds no
-// secret and no database URL, and is treated as compromised (docs/threat-model.md). Each job
-// gets a folder from mkdtemp; the service writes the input bytes there itself, runs the task's
-// child (run-child.ts) and removes the folder.
+// secret and no database URL, and is treated as compromised (docs/threat-model.md). It refuses to
+// start if a symlink in the code it grants its children leads out of it. Each job gets a folder
+// from mkdtemp; the service writes the input bytes there itself, checks the folder holds nothing
+// else a child could read through (guards.ts), runs the task's child (run-child.ts) and removes
+// the folder.
 
 export type Task = {
   /** The child's script, an absolute path inside the granted code. */
   script: string;
   /** The reply's media type: what the child writes on stdout. */
   contentType: string;
+  /** `selftest`'s own: the service lists the child's open files while it runs, and replies with
+   * its checks of the child's report, those files and itself (guards.ts). */
+  selftest?: true;
 };
 
 export const TASKS: Readonly<Record<string, Task>> = {
   echo: {
     script: fileURLToPath(new URL('./tasks/echo.ts', import.meta.url)),
     contentType: 'application/json',
+  },
+  selftest: {
+    script: fileURLToPath(new URL('./tasks/selftest.ts', import.meta.url)),
+    contentType: 'application/json',
+    selftest: true,
   },
 };
 
@@ -59,6 +78,9 @@ export type DocumentsOptions = {
   timeoutMs?: number;
   /** Aborted when the service stops, which kills the children still running. */
   signal?: AbortSignal;
+  /** The service's own environment and flags, which `selftest` checks: this process's unless
+   * given. */
+  self?: ProcessFacts;
 };
 
 type ErrorCode = 'unknown_task' | 'too_large' | 'failed' | 'timed_out' | 'too_much_output';
@@ -69,6 +91,11 @@ export function createDocumentsApp(options: DocumentsOptions): Hono {
   const jobsRoot = options.jobsRoot ?? realpathSync(tmpdir());
   const maxInputBytes = options.maxInputBytes ?? MAX_INPUT_BYTES;
   const timeoutMs = options.timeoutMs ?? CHILD_TIMEOUT_MS;
+  const self = options.self ?? {
+    env: process.env,
+    execArgv: process.execArgv,
+    platform: process.platform,
+  };
   const { logger } = options;
   const refuse = (c: Context, status: 404 | 413 | 500 | 504, code: ErrorCode) =>
     c.json({ error: { code } }, status);
@@ -85,6 +112,12 @@ export function createDocumentsApp(options: DocumentsOptions): Hono {
       const jobFolder = await mkdtemp(path.join(jobsRoot, 'instante-job-'));
       try {
         await writeFile(path.join(jobFolder, 'input'), input, { flag: 'wx', mode: 0o600 });
+        const refused = checkJobFolder(jobFolder);
+        if (refused.length > 0) {
+          logger.warn('documents.refused', { task: name, problems: refused });
+          return refuse(c, 500, 'failed');
+        }
+        const lsof = task.selftest === true ? openFilesAtOutput() : undefined;
         const result = await runChild({
           script: task.script,
           args: [],
@@ -92,15 +125,30 @@ export function createDocumentsApp(options: DocumentsOptions): Hono {
           grants,
           timeoutMs,
           ...(options.signal === undefined ? {} : { signal: options.signal }),
+          ...(lsof === undefined ? {} : { onOutput: lsof.onOutput }),
         });
         if (result.ok) {
+          const output =
+            lsof === undefined
+              ? result.stdout
+              : Buffer.from(
+                  JSON.stringify(
+                    selftestReply({
+                      service: serviceFacts(self),
+                      stdout: result.stdout,
+                      expectedFlags: childFlags({ jobFolder, grants }),
+                      platform: self.platform,
+                      openFiles: await lsof.files(),
+                    }),
+                  ),
+                );
           logger.info('documents.run', {
             task: name,
             ms: result.ms,
             inputBytes: input.byteLength,
-            outputBytes: result.stdout.byteLength,
+            outputBytes: output.byteLength,
           });
-          return c.body(new Uint8Array(result.stdout), 200, { 'content-type': task.contentType });
+          return c.body(new Uint8Array(output), 200, { 'content-type': task.contentType });
         }
         // The child's stderr stays in this Mac's log: it may quote the document.
         logger.warn('documents.failed', {
@@ -127,6 +175,23 @@ export function createDocumentsApp(options: DocumentsOptions): Hono {
   return app;
 }
 
+/** For `selftest`: lists the child's open files at its first output, which it sends once its
+ * probes are done; the child then waits on its stdin, which stays open until the list is taken. */
+function openFilesAtOutput() {
+  let files: Promise<readonly OpenFile[] | Error> = Promise.resolve(
+    new Error('the child sent nothing'),
+  );
+  return {
+    onOutput: async (pid: number) => {
+      files = listOpenFiles(pid).catch((error: unknown) =>
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      await files;
+    },
+    files: () => files,
+  };
+}
+
 export type RunningDocuments = {
   socket: string;
   /** Stops taking connections, kills the children still running, and removes the socket. */
@@ -144,7 +209,8 @@ export type StartDocumentsOptions = {
 
 /** Throws ConfigError when the configuration refuses to start. */
 export async function startDocuments(options: StartDocumentsOptions): Promise<RunningDocuments> {
-  const config = loadConfig(options.env, options.runtime ?? processRuntime());
+  const runtime = options.runtime ?? processRuntime();
+  const config = loadConfig(options.env, runtime);
   if (config.role !== 'documents') throw new Error(`startDocuments: ROLE=${config.role}`);
   const logger = createLogger({
     clock: options.clock ?? systemClock,
@@ -153,9 +219,18 @@ export async function startDocuments(options: StartDocumentsOptions): Promise<Ru
   });
   const socket = config.documentsSocket;
   privateFolder(path.dirname(socket));
+  // Before binding, so a refusal leaves nothing behind.
+  const grants = options.documents?.grants ?? grantedCode();
+  const granted = checkGrantedCode(grants);
 
   const stopping = new AbortController();
-  const app = createDocumentsApp({ ...options.documents, logger, signal: stopping.signal });
+  const app = createDocumentsApp({
+    ...options.documents,
+    grants,
+    logger,
+    signal: stopping.signal,
+    self: { env: options.env, execArgv: runtime.execArgv, platform: process.platform },
+  });
   // The requests still being handled: stopping waits for them, since each removes its job's
   // folder only once its child is gone.
   const handling = new Set<Promise<unknown>>();
@@ -171,7 +246,12 @@ export async function startDocuments(options: StartDocumentsOptions): Promise<Ru
   await listenOn(server, socket);
   // The folder already keeps everyone else out; the socket itself is the owner's too.
   chmodSync(socket, 0o600);
-  logger.info('documents.listening', { socket, env: config.env });
+  logger.info('documents.listening', {
+    socket,
+    env: config.env,
+    grantedEntries: granted.entries,
+    grantedLinks: granted.links,
+  });
 
   return {
     socket,

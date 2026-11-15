@@ -133,6 +133,18 @@ const ROLE_RULES: Record<Role, { needs: Name[]; refuses: Name[] }> = {
   cli: { needs: [], refuses: [] },
 };
 
+/** The names a role's process is started with (`env -i` plus these): every setting but those
+ * it refuses. */
+export function allowedNames(role: Role): Name[] {
+  return NAMES.filter((name) => !ROLE_RULES[role].refuses.includes(name));
+}
+
+/** The names of a process's Node options. Node reads `_` as `-` in them and ignores a value on
+ * a flag, so `--no_disable_sigusr1=false` still turns the signal back on. */
+export function optionNames(execArgv: readonly string[]): string[] {
+  return execArgv.map((a) => (a.split('=', 1)[0] ?? '').replaceAll('_', '-'));
+}
+
 export function loadConfig(
   env: Readonly<Record<string, string | undefined>>,
   runtime: Runtime,
@@ -187,9 +199,7 @@ export function loadConfig(
     if (runtime.nodeVersion !== PINNED_NODE) {
       problems.push(`production runs only on Node ${PINNED_NODE}`);
     }
-    // Node reads `_` as `-` in option names and ignores a value on these flags, so compare
-    // names alone: `--no_disable_sigusr1=false` still turns the signal back on.
-    const flags = runtime.execArgv.map((a) => (a.split('=', 1)[0] ?? '').replaceAll('_', '-'));
+    const flags = optionNames(runtime.execArgv);
     if (!flags.includes('--disable-sigusr1')) {
       problems.push('production processes start with --disable-sigusr1');
     }

@@ -230,6 +230,18 @@
   - **Acceptance:** each probe gives the expected answer; a planted symlink is refused; the positive control succeeds (the Linux half of platform spec 13).
   - **Verify:** `pnpm --filter @instante/backend test -- selftest`.
   - **Depends on:** T12. **Files:** `src/documents/{guards,tasks/selftest}.ts`, `eslint.config.mjs`, `test/selftest.test.ts`. **Size:** M.
+  - **As built:**
+    - the probes are in `src/kit/probes.ts`, so the backend's positive control and the child run the same code, which uses Node's built-ins only, since a child can load nothing else. Each answers `denied`, `allowed` or `failed: <code>`;
+    - the backend's side is `selftest(targets)` on the documents client. It runs the positive control, sends the targets (its port, the database's socket, the secrets folder) as the job's input, and validates the reply. What calls it on a running stack is T18's;
+    - `runChild` takes `onOutput`: at the child's first output, `selftest` lists its open files, and the child's stdin stays open until then;
+    - the start-up walk is hand-written: Node's recursive `readdir` follows symlinks into folders (it walked 877,000 entries through the workspace links). The walk takes about 0.3 s;
+    - `hoistWorkspacePackages: false` is in `pnpm-workspace.yaml`. A fresh install has no workspace links in `node_modules/.pnpm`, and the lockfile is unchanged;
+    - the ESLint ban lets `src/documents/` import only `spawn` and `execFile` from `child_process`, with no `shell` but `false` and no dynamic import. `scripts/test/lint-rules.test.ts` tries each form;
+    - measured on macOS 27 and Node 26.13.1:
+      - every probe in a child answers `ERR_ACCESS_DENIED`, the `localhost` lookup included;
+      - a child holds three socket pairs, three kqueues, a pipe pair, `/` open three times and `/dev/null`;
+      - a descriptor its parent inherited (the launcher's lock on fd 9) doesn't reach it, since libuv spawns with `posix_spawn`, which closes every descriptor not passed;
+      - through a symlink inside its grant, a child reads a file outside it, which a test shows.
 
 - [ ] **T14: The web app's request rules** (**review:** `proxy.ts`'s checks)
   - **Does:**

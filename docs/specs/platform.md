@@ -89,7 +89,7 @@ That keeps "patched the day it lands" possible without loosening the setting.
 ### The workspace
 - **Root files:**
   - `package.json` with `packageManager: pnpm@12.18.0`, `engines.node: ">=26.13 <27"` and the scripts below;
-  - `pnpm-workspace.yaml`, with the packages and the settings: `minimumReleaseAge`, lifecycle scripts blocked unless named, exact versions, and `enableGlobalVirtualStore: false`, so every package link stays inside the checkout, which the web app's and the document service's read grants rely on;
+  - `pnpm-workspace.yaml`, with the packages and the settings: `minimumReleaseAge`, lifecycle scripts blocked unless named, exact versions, `enableGlobalVirtualStore: false`, so every package link stays inside the checkout, which the web app's and the document service's read grants rely on, and `hoistWorkspacePackages: false`, so no link in `node_modules/.pnpm` points at the workspace's own packages, outside the document service's grants;
   - `mise.toml` pinning Node 26.13.1, with tools only (no `[env]`, tasks or templates, which would need `mise trust`), and `.env.example`;
   - `.claude/settings.json`, denying `Read` and `Edit` of `~/.instante/**`. A CI check fails if any committed `.claude/` settings file has a `sandbox` key, an `allowRead`, or a rule naming `~/.instante` that isn't a deny. The sandbox, if the owner turns it on, lives only in the owner's user settings.
 - **TypeScript, one config per package:**
@@ -181,8 +181,8 @@ That keeps "patched the day it lands" possible without loosening the setting.
   A rollback leaves neither the row nor the job's completion, and a late attempt writes nothing.
 - **`documents`** (`ROLE=documents`): a Hono app on the Unix socket `DOCUMENTS_SOCKET`, with no TCP port and one route, `POST /run/:task`. It's started with only its own environment names, and no secret or database URL.
   - **Its socket:** the socket's folder must be the owner's, mode `0700`, or it refuses to start; the socket itself is `0600`. A socket file nothing answers on (left by a process that died) is replaced; a socket something answers on, or anything else at the path (a symlink included, checked before binding, since macOS's `bind()` follows one that points nowhere), refuses. Stopping kills the children still running and closes the socket, which removes it, then waits for their jobs' folders to be removed.
-  - **At start,** it walks the code it will grant to its children (the backend source, `packages/contract` and `node_modules/.pnpm`, by real path) and refuses to run if any symlink there points outside them.
-  - **Each job** gets a folder from `fs.mkdtemp`, under the real path of the system's temporary folder (the grant must name the path the child sees), removed after the job. The service writes the input bytes itself, as `input` (`0600`), never unpacks an archive to disk, and refuses anything in the folder that isn't a regular file with one link. Every task reads `input` from its working folder, the job's, and writes its result on stdout.
+  - **At start,** it walks the code it will grant to its children (the backend source, `packages/contract` and `node_modules/.pnpm`, by real path) and refuses to run if any symlink there points outside them. The permission model follows a symlink inside a grant wherever it points (tried on Node 26), so this walk is what keeps a child in. It follows no link itself, resolves each one, refuses one that points nowhere or loops, and needs each grant to be a folder's real path; it takes about 0.3 s over about 45,000 entries. Hard links can't be told from pnpm's own (every installed file is one, from its store), so they're left to the job folders.
+  - **Each job** gets a folder from `fs.mkdtemp`, under the real path of the system's temporary folder (the grant must name the path the child sees), removed after the job. The service writes the input bytes itself, as `input` (`0600`), never unpacks an archive to disk, and refuses anything in the folder that isn't a regular file with one link, checked before the child starts, along with the folder itself being the owner's alone; a refused job logs `documents.refused` with what it found and answers `500 failed`. Every task reads `input` from its working folder, the job's, and writes its result on stdout.
   - **Limits:** an input of at most 50 MB (50,000,000 bytes), the largest documented one (a board's answer; each task checks its own, smaller cap); a result of at most 64 MiB, past which the child is killed; and the first 64 KiB of the child's stderr kept, whose first 2,000 characters (the logger's cap on any string) go in the log line, which stays on this Mac since it may quote the document.
   - **Replies:** the child's result with the task's media type, or `{ error: { code } }`: `404 unknown_task`, `413 too_large`, `500 failed` or `too_much_output`, and `504 timed_out`.
   - **Each task runs in a child process,** started with `child_process.spawn(process.execPath, [...])`, never through a shell or `fork`:
@@ -199,6 +199,20 @@ That keeps "patched the day it lands" possible without loosening the setting.
       - the service lists the child's open files with `lsof -p` and fails on any regular file, socket or lock file beyond its own pipes and Node's internal descriptors.
 
       The backend runs the same TCP and `localhost` lookup probes as a positive control, and they must succeed there. Every probe stays on this machine.
+
+      How it runs (decided in T13):
+      - **The targets:** the backend's client (`selftest(targets)`) sends them as the job's input: its own port, the database's socket and the secrets folder. The service holds none of them.
+      - **Each probe's answer:** `denied` when the permission model refused it (`ERR_ACCESS_DENIED`), `allowed` when it worked, or `failed: <code>` when something else stopped it (such as `ECONNREFUSED`), which means the attempt got through. The child's must all be `denied`, and the positive control's `allowed`.
+      - **The open files:** the child sends its report once its probes are done, then waits for its stdin to end. At that first output the service runs `lsof -n -P -w -F fltn -p <pid>`, from `/usr/sbin` or `/usr/bin`, since the service has no `PATH`, and then ends the child's stdin. Only numbered descriptors count. Allowed:
+        - fds 0 to 2 as the service's own pipes (libuv makes them socket pairs);
+        - Node's own: kqueues, pipes, `a_inode` event descriptors, `/` open as a folder and `/dev/null` (as listed on macOS 27 and Linux);
+        - nothing with a lock.
+      - **The reply:** `{ ok, problems, service, child, openFiles }`:
+        - `service` holds the service's names beyond its own (names only; its own are `INSTANTE_ENV`, `ROLE`, `INSTANTE_HOME` and `DOCUMENTS_SOCKET`, every setting its role doesn't refuse, plus `__CF_USER_TEXT_ENCODING`, which macOS's CoreFoundation sets in every process), whether any value is a database URL or a secret file's path (a name ending in `_FILE`, or a value inside `$INSTANTE_HOME/secrets`), and whether `--disable-sigusr1` is on;
+        - `child` is the child's report: its flags, its environment's names, and each probe's answer;
+        - `openFiles` lists the descriptors beyond those allowed.
+
+        The client validates the reply, and adds the positive control's results and their problems.
 - **`cli`** (`ROLE=cli`, through `src/main.ts`): `db migrate`, as `instante_owner` (all four steps below), and `db status`, as either role. Our migrations are reported on stdout, pg-boss's output on stderr. Exit codes: 0 done, 1 refused, 3 not current (`db status` with a migration pending, or pg-boss's schema not this release's, not whole, or not readable as the app role because a migrate stopped before its grants), 64 usage, 78 configuration. Later modules add their owner commands here.
 
 Every Instante process, the web server included, starts with `--disable-sigusr1` on its own command line, not through `NODE_OPTIONS`.
