@@ -171,6 +171,52 @@ describe('floor-guard', () => {
     expect(output).toContain('[assertion-removed] src/kept.test.ts');
   });
 
+  it('lets a deleted test and removed assertions through when a commit says why, for that file only', () => {
+    const repo = makeRepo({
+      'src/gone.test.ts': "it('a', () => { expect(1).toBe(1); });\n",
+      'src/kept.test.ts': "it('b', () => {\n  expect(2).toBe(2);\n  expect(3).toBe(3);\n});\n",
+      'src/other.test.ts': "it('c', () => {\n  expect(4).toBe(4);\n});\n",
+    });
+    repo.remove('src/gone.test.ts');
+    repo.write('src/kept.test.ts', "it('b', () => {\n  expect(2).toBe(2);\n});\n");
+    repo.write('src/other.test.ts', "it('c', () => {});\n");
+    repo.commit(
+      [
+        'Drop what the tests checked',
+        '',
+        'Tests removed from src/gone.test.ts: the feature it tested is gone',
+        'Tests removed from src/kept.test.ts: three is no longer a case',
+        // Too short to be a reason, so it counts for nothing.
+        'Tests removed from src/other.test.ts: gone',
+      ].join('\n'),
+    );
+    const { status, output } = repo.run(guard);
+    expect(status).toBe(1);
+    expect(output).toContain(
+      'floor-guard: tests removed from src/gone.test.ts, as a commit says: the feature it tested is gone',
+    );
+    expect(output).toContain(
+      'floor-guard: tests removed from src/kept.test.ts, as a commit says: three is no longer a case',
+    );
+    expect(output).not.toContain('[test-deleted] src/gone.test.ts');
+    expect(output).not.toContain('[assertion-removed] src/kept.test.ts');
+    expect(output).toContain('[assertion-removed] src/other.test.ts');
+    expect(output).toContain('`Tests removed from <file>: <reason>`');
+  });
+
+  it('needs the reason in a commit: a change not yet committed is flagged', () => {
+    const repo = makeRepo({
+      'src/kept.test.ts': "it('b', () => {\n  expect(2).toBe(2);\n  expect(3).toBe(3);\n});\n",
+    });
+    repo.commit(
+      'Tests removed from src/elsewhere.test.ts: a different file, so it counts for nothing',
+    );
+    repo.write('src/kept.test.ts', "it('b', () => {\n  expect(2).toBe(2);\n});\n");
+    const { status, output } = repo.run(guard);
+    expect(status).toBe(1);
+    expect(output).toContain('[assertion-removed] src/kept.test.ts');
+  });
+
   it('does not flag an assertion that only moved', () => {
     const repo = makeRepo({
       'src/kept.test.ts': "it('b', () => {\n  expect(2).toBe(2);\n  expect(3).toBe(3);\n});\n",

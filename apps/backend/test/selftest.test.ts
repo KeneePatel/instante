@@ -1,14 +1,17 @@
 import { execFileSync, spawn } from 'node:child_process';
 import {
+  chmodSync,
   closeSync,
   existsSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
   openSync,
+  readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -18,11 +21,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { CHILD_CODE, copyCode, type Code } from '../src/documents/code.ts';
 import { listOpenFiles } from '../src/documents/guards.ts';
 import { runChild } from '../src/documents/run-child.ts';
 import {
   TASKS,
-  grantedCode,
   startDocuments,
   type RunningDocuments,
   type Task,
@@ -78,6 +81,14 @@ vi.mock('node:dns/promises', async (importOriginal) => {
 
 const children = realpathSync(fileURLToPath(new URL('./children/', import.meta.url)));
 const child = (name: string) => path.join(children, `${name}.ts`);
+/** The platform's tasks and these tests' children, as the service copies them for its children. */
+const code: Code = {
+  root: path.dirname(path.dirname(children)),
+  files: [
+    ...CHILD_CODE.files.map((file) => `src/${file}`),
+    ...readdirSync(children).map((file) => `test/children/${file}`),
+  ],
+};
 const folders: string[] = [];
 /** A new private folder (mode 0700, from mkdtemp), by real path. */
 function privateFolder(): string {
@@ -168,7 +179,7 @@ describe('selftest', () => {
       env: env(path.join(privateFolder(), 'documents.sock')),
       runtime: runtime(['--disable-sigusr1']),
       sink,
-      documents: { tasks, grants: [...grantedCode(), children], jobsRoot },
+      documents: { tasks, code, jobsRoot },
     });
   });
   afterAll(async () => {
@@ -193,7 +204,8 @@ describe('selftest', () => {
             '--no-experimental-sqlite',
             '--freeze-flags-after-init',
             expect.stringMatching(new RegExp(`^--allow-fs-read=${jobsRoot}/instante-job-\\w+$`)),
-            ...[...grantedCode(), children].map((grant) => `--allow-fs-read=${grant}`),
+            // The code's copy, beside the socket.
+            expect.stringMatching(/^--allow-fs-read=\/.+\/instante-code-\w+$/),
           ] as unknown,
           env: PLATFORM_NAMES,
           probes: DENIED,
@@ -271,7 +283,6 @@ describe('selftest’s checks of the service itself', () => {
       },
       runtime: runtime([]),
       sink: recording().sink,
-      documents: { grants: grantedCode() },
     });
     try {
       const result = await createDocumentsClient(socket).selftest(targets);
@@ -367,7 +378,7 @@ describe('the job folder check', () => {
       env: env(path.join(privateFolder(), 'documents.sock')),
       runtime: runtime(['--disable-sigusr1']),
       sink,
-      documents: { grants: grantedCode(), jobsRoot },
+      documents: { jobsRoot },
     });
   });
   afterAll(async () => {
@@ -423,56 +434,150 @@ describe('the job folder check', () => {
   });
 });
 
-describe('the granted code at start', () => {
-  it('refuses to start when a symlink in it leads out, before binding its socket', async () => {
-    const grant = privateFolder();
-    mkdirSync(path.join(grant, 'pkg'));
-    symlinkSync(secret, path.join(grant, 'pkg', 'link'));
+describe('the children’s code', () => {
+  it('refuses to start when the code holds a symlink, before binding its socket, leaving no copy', async () => {
+    const source = privateFolder();
+    symlinkSync(secret, path.join(source, 'task.ts'));
     const socket = path.join(privateFolder(), 'documents.sock');
+    const jobsRoot = privateFolder();
     await expect(
       startDocuments({
         env: env(socket),
         runtime: runtime(['--disable-sigusr1']),
         sink: recording().sink,
-        documents: { grants: [grant] },
+        documents: { code: { root: source, files: ['task.ts'] }, jobsRoot },
       }),
-    ).rejects.toThrow(`${path.join(grant, 'pkg', 'link')} points outside, to ${secret}`);
+    ).rejects.toThrow(`${path.join(source, 'task.ts')} is reached through a symlink, to ${secret}`);
     expect(existsSync(socket)).toBe(false);
+    expect(readdirSync(jobsRoot)).toEqual([]);
   });
 
-  it('is needed: a child reads outside its grant through a symlink, or by `..` after one', async () => {
-    const grant = privateFolder();
-    symlinkSync(secret, path.join(grant, 'link'));
-    symlinkSync('.', path.join(grant, 'up'));
-    const read = async (file: string) => {
-      const done = await runChild({
-        script: child('reads'),
-        args: [file],
-        jobFolder: privateFolder(),
-        grants: [grant, children],
+  it('leaves no copy when a task’s script isn’t in the code, or the socket is taken', async () => {
+    const folder = privateFolder();
+    const start = (tasks?: Record<string, Task>) =>
+      startDocuments({
+        env: env(path.join(folder, 'documents.sock')),
+        runtime: runtime(['--disable-sigusr1']),
+        sink: recording().sink,
+        documents: tasks === undefined ? {} : { tasks },
       });
-      return done.ok ? done.stdout.toString() : done.stderr;
-    };
-    expect(await read(secret)).toBe('ERR_ACCESS_DENIED');
-    expect(await read(path.join(grant, 'link'))).toBe('postgresql://instante_app:hex@/instante');
-    // As text, `up/..` is the grant itself, so this reads as inside it; the kernel climbs from
-    // where `up` points, the grant, to the folder holding the secrets.
-    const climb = `${grant}/up/../${path.relative(path.dirname(grant), secret)}`;
-    expect(path.normalize(climb).startsWith(`${grant}/`)).toBe(true);
-    expect(await read(climb)).toBe('postgresql://instante_app:hex@/instante');
+    await expect(
+      start({ outside: { script: child('reads'), contentType: 'text/plain' } }),
+    ).rejects.toThrow(`The task outside's script, ${child('reads')}, isn't in its children's code`);
+    expect(readdirSync(folder)).toEqual([]);
+    writeFileSync(path.join(folder, 'documents.sock'), 'not a socket');
+    await expect(start()).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    expect(readdirSync(folder)).toEqual(['documents.sock']);
   });
 
-  it('starts on the real granted code, and logs what it walked', async () => {
+  it('refuses a folder for its copy and jobs that others can enter, or whose path holds a `*`', async () => {
+    const start = (jobsRoot: string) =>
+      startDocuments({
+        env: env(path.join(privateFolder(), 'documents.sock')),
+        runtime: runtime(['--disable-sigusr1']),
+        sink: recording().sink,
+        documents: { jobsRoot },
+      });
+    const open = privateFolder();
+    chmodSync(open, 0o750);
+    await expect(start(open)).rejects.toThrow(
+      "The document service's jobs folder must be yours, mode 0700, not 750",
+    );
+    // Node reads `*` in a read grant as a wildcard: a grant of <folder>/st*r/x reaches
+    // <folder>/stuff.
+    const starred = path.join(privateFolder(), 'st*r');
+    mkdirSync(starred, { mode: 0o700 });
+    await expect(start(starred)).rejects.toThrow(/may hold only letters, digits/);
+    expect(readdirSync(starred)).toEqual([]);
+  });
+
+  it('starts with a copy beside its socket, clears what a killed service left, and removes it on stop', async () => {
+    const folder = privateFolder();
+    for (const left of ['instante-code-OLD', 'instante-job-OLD']) {
+      mkdirSync(path.join(folder, left));
+      writeFileSync(path.join(folder, left, 'input'), 'an old document');
+    }
     const { sink, lines } = recording();
     const service = await startDocuments({
-      env: env(path.join(privateFolder(), 'documents.sock')),
+      env: env(path.join(folder, 'documents.sock')),
       runtime: runtime(['--disable-sigusr1']),
       sink,
     });
-    await service.close();
     const listening = lines.find((line) => line['event'] === 'documents.listening');
-    expect(listening?.['grantedLinks']).toBeGreaterThan(100);
-    expect(listening?.['grantedEntries']).toBeGreaterThan(Number(listening?.['grantedLinks']));
+    const copy = String(listening?.['code']);
+    try {
+      expect(listening).toMatchObject({ codeFiles: CHILD_CODE.files.length, removed: 2 });
+      expect(path.dirname(copy)).toBe(folder);
+      expect(readdirSync(folder).sort()).toEqual(['documents.sock', path.basename(copy)].sort());
+      expect(readdirSync(copy, { recursive: true }).sort()).toEqual(
+        ['documents', 'documents/tasks', 'kit', 'package.json', ...CHILD_CODE.files].sort(),
+      );
+      // Node looks for a package.json above a script without checking its grants; this one
+      // stops it in the copy.
+      expect(readFileSync(path.join(copy, 'package.json'), 'utf8')).toBe('{ "type": "module" }\n');
+      expect(statSync(path.join(copy, 'kit/probes.ts')).mode & 0o777).toBe(0o400);
+      expect(readFileSync(path.join(copy, 'kit/probes.ts'), 'utf8')).toBe(
+        readFileSync(path.join(CHILD_CODE.root, 'kit/probes.ts'), 'utf8'),
+      );
+    } finally {
+      await service.close();
+    }
+    expect(readdirSync(folder)).toEqual([]);
+  });
+
+  it('is needed: through a symlink, inside a grant or anywhere on a path, a child reads what its grants don’t cover, except in a folder whose name nothing else has', async () => {
+    const read = async (file: string, grant: string) => {
+      const copy = copyCode(code, privateFolder());
+      const done = await runChild({
+        script: path.join(copy, 'test/children/reads.ts'),
+        args: [file],
+        jobFolder: privateFolder(),
+        grants: [copy, grant],
+      });
+      return done.ok ? done.stdout.toString() : done.stderr;
+    };
+    // A symlink inside a grant is followed wherever it points.
+    const linked = privateFolder();
+    symlinkSync(secret, path.join(linked, 'link'));
+    expect(await read(secret, linked)).toBe('ERR_ACCESS_DENIED');
+    expect(await read(path.join(linked, 'link'), linked)).toBe(
+      'postgresql://instante_app:hex@/instante',
+    );
+
+    // A symlink outside every grant steers the kernel too: Node checks the path after removing
+    // `name/..` as text, while the kernel follows `out` to a deeper folder before climbing. With
+    // as many `..` as `out` has names, the text is at `/` and the kernel at `<scratch>/m`; the
+    // rest of the path then reads, as text, as inside the grant, and the kernel looks for it
+    // under `<scratch>/m`.
+    const scratch = privateFolder();
+    const depth = scratch.split('/').length - 1;
+    const deeper = path.join(scratch, 'm', ...Array<string>(depth + 1).fill('z'));
+    mkdirSync(deeper, { recursive: true });
+    symlinkSync(deeper, path.join(scratch, 'out'));
+    const via = (target: string) =>
+      `${path.join(scratch, 'out')}${'/..'.repeat(depth + 1)}${target}`;
+    const twinOf = (target: string) => path.join(scratch, 'm', target);
+
+    // A grant named like other folders, such as `src`: the kernel reads whichever it reaches.
+    const grant = path.join(privateFolder(), 'src');
+    mkdirSync(grant);
+    writeFileSync(path.join(grant, 'file'), 'the grant');
+    mkdirSync(twinOf(grant), { recursive: true });
+    writeFileSync(path.join(twinOf(grant), 'file'), 'another src folder');
+    expect(path.normalize(via(path.join(grant, 'file')))).toBe(path.join(grant, 'file'));
+    expect(await read(via(path.join(grant, 'file')), grant)).toBe('another src folder');
+
+    // A grant whose name nothing else has, like the code's copy and a job's folder: the path
+    // either goes through the real folder or doesn't resolve.
+    const unique = path.join(privateFolder(), 'instante-code-a1b2c3');
+    mkdirSync(unique);
+    writeFileSync(path.join(unique, 'file'), 'the grant');
+    expect(await read(via(path.join(unique, 'file')), unique)).toBe('ENOENT');
+    // Unless someone makes a folder of that name where the kernel lands: the reason the copy's
+    // folder is the owner's alone, with a name no one else learns.
+    mkdirSync(twinOf(unique), { recursive: true });
+    writeFileSync(path.join(twinOf(unique), 'file'), 'a twin');
+    expect(await read(via(path.join(unique, 'file')), unique)).toBe('a twin');
   });
 });
 

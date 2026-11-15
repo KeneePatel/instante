@@ -7,6 +7,10 @@
 // Exit codes: 0 clean, 1 at least one floor violation, 2 the guard could not run.
 // It reports the rule, the file and the line, and only ever flags moves that lower the bar.
 //
+// CONSTRAINTS.md allows a test deleted with a reason in the commit message. A commit since the
+// merge base holding the line `Tests removed from <file>: <reason>` lets that file's deleted
+// tests and removed assertions through, and the guard prints the reason for the review.
+//
 // The patterns spell their own keywords with a character class (for example "TOD[O]"),
 // so this file never matches itself.
 import { execFileSync } from 'node:child_process';
@@ -50,6 +54,15 @@ process.chdir(top);
 
 const mergeBase = git(['merge-base', base, 'HEAD'])?.trim();
 if (mergeBase === undefined || mergeBase === '') bail(`no merge base against ${base}`);
+
+// The files whose tests the branch's commit messages say were removed, and why.
+const messages = git(['log', '--format=%B', `${mergeBase}..HEAD`]);
+if (messages === null) bail(`could not read the commits since ${mergeBase}`);
+const testsRemoved = new Map<string, string>();
+for (const match of messages.matchAll(/^Tests removed from (\S+): (\S.{9,})$/gm)) {
+  const [, where, why] = match;
+  if (where !== undefined && why !== undefined) testsRemoved.set(where, why.trim());
+}
 
 const tracked = git(['diff', '--unified=0', mergeBase, '--']);
 if (tracked === null) bail(`could not diff against ${mergeBase}`);
@@ -181,12 +194,20 @@ for (const f of ['apps/web/next.config.ts', 'apps/web/next.config.mjs']) {
   }
 }
 
-// 6. Tests deleted, or assertions removed from a test that stays (moved lines don't count).
-for (const f of deleted) if (isTest(f)) flag('test-deleted', f, 'file deleted');
+// 6. Tests deleted, or assertions removed from a test that stays (moved lines don't count),
+// unless a commit says why that file's tests went.
+const reasoned = new Set<string>();
+for (const f of deleted) {
+  if (!isTest(f)) continue;
+  if (testsRemoved.has(f)) reasoned.add(f);
+  else flag('test-deleted', f, 'file deleted');
+}
 for (const { file: f, text } of removed) {
   if (!isTest(f) || deleted.includes(f) || !/\b(expect|assert)\b/.test(text)) continue;
   const moved = added.some((a) => a.file === f && a.text.trim() === text.trim());
-  if (!moved) flag('assertion-removed', f, text);
+  if (moved) continue;
+  if (testsRemoved.has(f)) reasoned.add(f);
+  else flag('assertion-removed', f, text);
 }
 
 // 7. The bar weakened in its configuration.
@@ -306,6 +327,11 @@ for (const r of removedRules) {
   if (verdict !== null) flag(verdict, r.file, `${r.text}  ->  ${a.text}`);
 }
 
+for (const f of reasoned) {
+  console.log(
+    `floor-guard: tests removed from ${f}, as a commit says: ${testsRemoved.get(f) ?? ''}`,
+  );
+}
 if (findings.length === 0) {
   console.log('floor-guard: clean');
   process.exit(0);
@@ -313,6 +339,8 @@ if (findings.length === 0) {
 console.error(`floor-guard: ${String(findings.length)} floor violation(s):`);
 for (const f of findings) console.error(`  [${f.rule}] ${f.file}: ${f.text}`);
 console.error(
-  '\nEach lowers the bar. Fix the code, or ask the owner for an exception row in CONSTRAINTS.md.',
+  '\nEach lowers the bar. Fix the code, or ask the owner for an exception row in CONSTRAINTS.md.' +
+    '\nA test deleted on purpose passes with a reason in a commit message:' +
+    ' `Tests removed from <file>: <reason>`.',
 );
 process.exit(1);

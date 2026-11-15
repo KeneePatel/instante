@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { allowedNames, optionNames } from '../kit/config.ts';
@@ -8,80 +8,10 @@ import { PROBES } from '../kit/probes.ts';
 
 // The document service's checks on what its children can reach (docs/specs/platform.md,
 // "documents"; docs/threat-model.md, "A restricted child reads through a symlink or an inherited
-// descriptor"). Node's permission model follows a symlink inside a read grant wherever it
-// points, so the code granted to the children must hold none that leads out of it, and a job's
-// folder nothing but plain files. `selftest` then shows a child's flags, environment, probes and
-// open files, and the service's own environment and flags.
-
-/** The grant holding `target`, if any. */
-const grantOf = (grants: readonly string[], target: string) =>
-  grants.find((grant) => target === grant || target.startsWith(`${grant}/`));
-
-/** How many names `target` adds to `grant`'s path. */
-const depth = (grant: string, target: string) =>
-  target === grant ? 0 : target.slice(grant.length + 1).split('/').length;
-
-/** Walks the granted code, following no link, and resolves every symlink in it as the kernel
- * does. Throws, naming them, if any points outside the grants or nowhere, or to a folder that sits
- * nearer its grant's top than the link sits in its own, or if a grant isn't a folder's real path
- * (the path a child's grant must name).
- *
- * The permission model checks a path after removing `link/..` as text, while the kernel follows
- * the link first and climbs from its target. So `..` after a link to a shallower folder climbs
- * out of the grants while the path still reads as inside them. */
-export function checkGrantedCode(grants: readonly string[]): { entries: number; links: number } {
-  const problems: string[] = [];
-  for (const grant of grants) {
-    if (
-      !existsSync(grant) ||
-      realpathSync.native(grant) !== grant ||
-      !lstatSync(grant).isDirectory()
-    ) {
-      problems.push(`${grant} isn't a folder's real path`);
-    }
-  }
-  let entries = 0;
-  let links = 0;
-  const folders = problems.length === 0 ? grants.map((grant) => ({ grant, folder: grant })) : [];
-  for (let next = folders.pop(); next !== undefined; next = folders.pop()) {
-    const { grant, folder } = next;
-    for (const entry of readdirSync(folder, { withFileTypes: true })) {
-      entries++;
-      const entryPath = path.join(folder, entry.name);
-      if (entry.isDirectory()) {
-        folders.push({ grant, folder: entryPath });
-      } else if (entry.isSymbolicLink()) {
-        links++;
-        let target: string;
-        try {
-          // The JS realpath removes `..` as text, which the kernel doesn't.
-          target = realpathSync.native(entryPath);
-        } catch {
-          problems.push(`${entryPath} points nowhere`);
-          continue;
-        }
-        const holder = grantOf(grants, target);
-        if (holder === undefined) {
-          problems.push(`${entryPath} points outside, to ${target}`);
-        } else if (
-          statSync(target).isDirectory() &&
-          depth(holder, target) < depth(grant, entryPath)
-        ) {
-          problems.push(`${entryPath} sits deeper than the folder it points to, ${target}`);
-        }
-      }
-    }
-  }
-  if (problems.length > 0) {
-    const shown = problems.slice(0, 10);
-    const more =
-      problems.length > shown.length ? `\n(and ${String(problems.length - 10)} more)` : '';
-    throw new Error(
-      `The document service won't grant its children this code:\n${shown.join('\n')}${more}`,
-    );
-  }
-  return { entries, links };
-}
+// descriptor"). A job's folder, like the code's copy (code.ts), must hold nothing but plain
+// files: Node's permission model follows a symlink inside a read grant wherever it points.
+// `selftest` then shows a child's flags, environment, probes and open files, and the service's
+// own environment and flags.
 
 /** What's wrong with a job's folder, if anything: it must be a real folder, the owner's alone,
  * holding only regular files with one link each, since through a symlink or a hard link a child

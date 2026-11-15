@@ -13,7 +13,6 @@ import path from 'node:path';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { ChildReport } from '../kit/probes.ts';
 import {
-  checkGrantedCode,
   checkJobFolder,
   parseLsof,
   selftestReply,
@@ -33,141 +32,12 @@ afterAll(() => {
   for (const made of folders) rmSync(made, { recursive: true, force: true });
 });
 
-/** Two grants, `a` holding `a/deep/file`, and a folder outside them holding `secret`. */
-function tree() {
-  const root = folder();
-  const a = path.join(root, 'a');
-  const b = path.join(root, 'b');
-  const outside = path.join(root, 'outside');
-  for (const made of [path.join(a, 'deep'), b, outside]) mkdirSync(made, { recursive: true });
-  writeFileSync(path.join(a, 'deep', 'file'), '');
-  writeFileSync(path.join(b, 'file'), '');
+/** A folder holding `secret`, outside a job's folder. */
+function outsideFolder(): string {
+  const outside = folder();
   writeFileSync(path.join(outside, 'secret'), 'top secret');
-  return { a, b, outside, grants: [a, b] };
+  return outside;
 }
-
-describe('checkGrantedCode', () => {
-  it('passes symlinks that stay inside the grants, and counts what it walked', () => {
-    const { a, b, grants } = tree();
-    mkdirSync(path.join(b, 'inner', 'deeper'), { recursive: true });
-    symlinkSync('file', path.join(a, 'deep', 'same-folder'));
-    // A link to a file may point anywhere in the grants: `..` after a file goes nowhere.
-    symlinkSync(path.join(b, 'file'), path.join(a, 'deep', 'other-grant'));
-    // A link to a folder may point as deep as itself, or deeper (pnpm's do both).
-    symlinkSync('../b/inner', path.join(a, 'as-deep'));
-    symlinkSync('../b/inner/deeper', path.join(a, 'deeper'));
-    // a: deep, deep/file, four links; b: file, inner, inner/deeper.
-    expect(checkGrantedCode(grants)).toEqual({ entries: 9, links: 4 });
-  });
-
-  it('refuses a link to a folder nearer its grant’s top than the link is, which `..` climbs out of', () => {
-    const { a, b, grants } = tree();
-    symlinkSync('..', path.join(a, 'deep', 'up'));
-    symlinkSync('../../b', path.join(a, 'deep', 'to-b'));
-    symlinkSync('../b', path.join(a, 'to-b'));
-    expect(() => checkGrantedCode(grants)).toThrow(
-      [
-        `${path.join(a, 'to-b')} sits deeper than the folder it points to, ${b}`,
-        `${path.join(a, 'deep', 'to-b')} sits deeper than the folder it points to, ${b}`,
-        `${path.join(a, 'deep', 'up')} sits deeper than the folder it points to, ${a}`,
-      ].join('\n'),
-    );
-  });
-
-  it('resolves a link as the kernel does: `..` after a link outside goes up from its target', () => {
-    const { b, outside, grants } = tree();
-    const root = path.dirname(b);
-    mkdirSync(path.join(b, 'inner'));
-    mkdirSync(path.join(outside, 'dir'));
-    mkdirSync(path.join(outside, 'b', 'inner'), { recursive: true });
-    symlinkSync(path.join(outside, 'dir'), path.join(root, 'l'));
-    // As text, l/.. is the root, so this reads as b/inner; the kernel lands in outside/b/inner.
-    symlinkSync('../l/../b/inner', path.join(b, 'evil'));
-    expect(() => checkGrantedCode(grants)).toThrow(
-      `${path.join(b, 'evil')} points outside, to ${path.join(outside, 'b', 'inner')}`,
-    );
-  });
-
-  it('refuses a symlink pointing outside the grants, absolute or relative, however deep', () => {
-    for (const make of [
-      (outside: string, at: string) => {
-        symlinkSync(path.join(outside, 'secret'), at);
-      },
-      (_outside: string, at: string) => {
-        symlinkSync('../../outside/secret', at);
-      },
-    ]) {
-      const { a, outside, grants } = tree();
-      const link = path.join(a, 'deep', 'link');
-      make(outside, link);
-      expect(() => checkGrantedCode(grants)).toThrow(
-        `The document service won't grant its children this code:\n${link} points outside, to ${path.join(outside, 'secret')}`,
-      );
-    }
-    // A folder beside a grant whose name starts with the grant's is outside it too.
-    const { a, grants } = tree();
-    mkdirSync(`${a}-evil`);
-    writeFileSync(path.join(`${a}-evil`, 'secret'), '');
-    symlinkSync(path.join(`${a}-evil`, 'secret'), path.join(a, 'link'));
-    expect(() => checkGrantedCode(grants)).toThrow(
-      `${path.join(a, 'link')} points outside, to ${path.join(`${a}-evil`, 'secret')}`,
-    );
-  });
-
-  it('refuses a symlink that points nowhere, or round in a loop', () => {
-    const { b, grants } = tree();
-    symlinkSync('missing', path.join(b, 'dangling'));
-    symlinkSync('loop-2', path.join(b, 'loop-1'));
-    symlinkSync('loop-1', path.join(b, 'loop-2'));
-    expect(() => checkGrantedCode(grants)).toThrow(
-      [
-        `${path.join(b, 'dangling')} points nowhere`,
-        `${path.join(b, 'loop-1')} points nowhere`,
-        `${path.join(b, 'loop-2')} points nowhere`,
-      ].join('\n'),
-    );
-  });
-
-  it('follows no link while walking: one to a folder outside is refused, not entered', () => {
-    const { a, outside, grants } = tree();
-    symlinkSync('/', path.join(outside, 'root'));
-    symlinkSync(outside, path.join(a, 'out'));
-    expect(() => checkGrantedCode(grants)).toThrow(
-      new Error(
-        `The document service won't grant its children this code:\n${path.join(a, 'out')} points outside, to ${outside}`,
-      ),
-    );
-  });
-
-  it('refuses a grant that isn’t a folder’s real path', () => {
-    const { a, outside } = tree();
-    const link = path.join(outside, 'link-to-a');
-    symlinkSync(a, link);
-    const file = path.join(outside, 'secret');
-    const missing = path.join(outside, 'missing');
-    // A real folder, reached through a linked parent.
-    const throughLink = path.join(link, 'deep');
-    expect(() => checkGrantedCode([link, file, missing, throughLink])).toThrow(
-      [link, file, missing, throughLink]
-        .map((grant) => `${grant} isn't a folder's real path`)
-        .join('\n'),
-    );
-  });
-
-  it('names the first ten problems and counts the rest', () => {
-    const { a, grants } = tree();
-    for (let i = 0; i < 12; i++)
-      symlinkSync('/', path.join(a, `out-${String(i).padStart(2, '0')}`));
-    let message = '';
-    try {
-      checkGrantedCode(grants);
-    } catch (error) {
-      message = (error as Error).message;
-    }
-    expect(message.split('\n')).toHaveLength(12);
-    expect(message).toMatch(/\n\(and 2 more\)$/);
-  });
-});
 
 describe('checkJobFolder', () => {
   /** A job folder holding `input`, as the service makes it. */
@@ -183,7 +53,7 @@ describe('checkJobFolder', () => {
 
   it('refuses a symlink, a folder, and a file with more than one link', () => {
     const made = job();
-    const { outside } = tree();
+    const outside = outsideFolder();
     symlinkSync(path.join(outside, 'secret'), path.join(made, 'link'));
     mkdirSync(path.join(made, 'sub'));
     linkSync(path.join(outside, 'secret'), path.join(made, 'hard'));

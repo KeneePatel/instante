@@ -30,10 +30,6 @@ describe('pnpm-workspace.yaml', () => {
   it('keeps package links inside the checkout', () => {
     expect(setting('enableGlobalVirtualStore')).toBe('false');
   });
-
-  it('links no workspace package into node_modules/.pnpm, the code the document service grants', () => {
-    expect(setting('hoistWorkspacePackages')).toBe('false');
-  });
 });
 
 describe('package.json files', () => {

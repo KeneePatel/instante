@@ -19,12 +19,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { CHILD_CODE, copyCode, type Code } from '../src/documents/code.ts';
 import { CHILD_TIMEOUT_MS, MAX_CHILD_OUTPUT_BYTES, runChild } from '../src/documents/run-child.ts';
 import {
   MAX_INPUT_BYTES,
   TASKS,
   createDocumentsApp,
-  grantedCode,
   startDocuments,
   type RunningDocuments,
   type Task,
@@ -84,6 +84,14 @@ async function childrenRunning(script: string): Promise<number[]> {
 }
 /** The checkout this file is in, by real path. */
 const root = realpathSync(fileURLToPath(new URL('../../../', import.meta.url)));
+/** The platform's tasks and these tests' children, as the service copies them for its children. */
+const code: Code = {
+  root: path.join(root, 'apps/backend'),
+  files: [
+    ...CHILD_CODE.files.map((file) => `src/${file}`),
+    ...readdirSync(children).map((file) => `test/children/${file}`),
+  ],
+};
 const json = (task: string): Task => ({ script: child(task), contentType: 'application/json' });
 const tasks = {
   echo: TASKS['echo'] as Task,
@@ -248,25 +256,28 @@ describe('runChild', () => {
     expect(getEventListeners(stopping.signal, 'abort')).toEqual([]);
   });
 
-  it('lets a child read the granted code and nothing else: not the tests, nor the checkout', async () => {
+  it('lets a child read its code’s copy and nothing else: not the source, the packages or the checkout', async () => {
+    const copy = copyCode(code, privateFolder());
     const paths = [
+      path.join(copy, 'src/documents/tasks/echo.ts'),
+      path.join(copy, 'package.json'),
       path.join(root, 'apps/backend/src/documents/tasks/echo.ts'),
       path.join(root, 'packages/contract/package.json'),
       realpathSync(createRequire(import.meta.url).resolve('hono')),
       path.join(root, 'apps/backend/test/start.test.ts'),
-      path.join(root, 'apps/backend/package.json'),
       path.join(root, 'package.json'),
     ];
     const done = await runChild({
-      script: child('reach'),
+      script: path.join(copy, 'test/children/reach.ts'),
       args: paths,
       jobFolder: privateFolder(),
-      grants: [...grantedCode(), children],
+      grants: [copy],
     });
     expect(done.ok && JSON.parse(done.stdout.toString())).toEqual([
       'read',
       'read',
-      'read',
+      'ERR_ACCESS_DENIED',
+      'ERR_ACCESS_DENIED',
       'ERR_ACCESS_DENIED',
       'ERR_ACCESS_DENIED',
       'ERR_ACCESS_DENIED',
@@ -328,19 +339,6 @@ describe('runChild’s onOutput', () => {
   });
 });
 
-describe('grantedCode', () => {
-  it('is the backend source, packages/contract and node_modules/.pnpm, by real path', () => {
-    expect(grantedCode()).toEqual([
-      path.join(root, 'apps/backend/src'),
-      path.join(root, 'packages/contract'),
-      path.join(root, 'node_modules/.pnpm'),
-    ]);
-    const link = path.join(privateFolder(), 'checkout');
-    symlinkSync(root, link);
-    expect(grantedCode(link)).toEqual(grantedCode());
-  });
-});
-
 describe('the limits', () => {
   it('hold the platform spec’s values', () => {
     expect(MAX_INPUT_BYTES).toBe(50_000_000);
@@ -371,7 +369,7 @@ describe('the document service', () => {
       sink,
       documents: {
         tasks,
-        grants: [...grantedCode(), children],
+        code,
         jobsRoot,
         maxInputBytes: 1024,
         timeoutMs: 500,
@@ -468,6 +466,7 @@ describe('the document service', () => {
     try {
       const app = createDocumentsApp({
         logger: createLogger({ clock: systemClock, sink: quiet }),
+        code: { source: CHILD_CODE, copy: copyCode(CHILD_CODE, privateFolder()) },
         jobsRoot: privateFolder(),
       });
       const reply = await app.request('/run/echo', { method: 'POST', body: new Uint8Array([1]) });
@@ -496,6 +495,7 @@ describe('the document service', () => {
     const { sink, lines: logged } = recording();
     const app = createDocumentsApp({
       logger: createLogger({ clock: systemClock, sink }),
+      code: { source: CHILD_CODE, copy: copyCode(CHILD_CODE, privateFolder()) },
       jobsRoot: path.join(privateFolder(), 'gone'),
     });
     const reply = await app.request('/run/echo', { method: 'POST', body: new Uint8Array([1]) });
@@ -551,7 +551,11 @@ describe('the document service', () => {
       (JSON.parse(a.body.toString()) as { execArgv: string[] }).execArgv.filter((f) =>
         f.startsWith('--allow-fs-read='),
       ),
-    ).toEqual([cwdOf(a), ...grantedCode(), children].map((p) => `--allow-fs-read=${p}`));
+    ).toEqual([
+      `--allow-fs-read=${cwdOf(a)}`,
+      // The code's copy, beside the socket.
+      expect.stringMatching(/^--allow-fs-read=\/.+\/instante-code-\w+$/),
+    ]);
     expect((JSON.parse(a.body.toString()) as { input: string }).input).toBe('600');
   });
 });
@@ -616,7 +620,7 @@ describe('starting and stopping the document service', () => {
       sink,
       documents: {
         tasks: { forever: json('forever') },
-        grants: [...grantedCode(), children],
+        code,
         jobsRoot,
         // Below the test's own timeout, so a stop that fails still ends the child.
         timeoutMs: 4000,
@@ -626,7 +630,8 @@ describe('starting and stopping the document service', () => {
       const running = createDocumentsClient(socket)
         .run('forever', new Uint8Array([1]))
         .catch((error: unknown) => error);
-      const script = child('forever');
+      // As the child runs it: from the code's copy.
+      const script = 'test/children/forever.ts';
       for (let i = 0; i < 40 && (await childrenRunning(script)).length === 0; i++) await sleep(50);
       expect(await childrenRunning(script)).toHaveLength(1);
       expect(readdirSync(jobsRoot)).toHaveLength(1);
@@ -652,7 +657,7 @@ describe('starting and stopping the document service', () => {
       sink: quiet,
       documents: {
         tasks: { loud: json('loud') },
-        grants: [...grantedCode(), children],
+        code,
         jobsRoot: privateFolder(),
       },
     });

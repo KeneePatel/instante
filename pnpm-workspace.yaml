@@ -22,11 +22,5 @@ allowBuilds:
 saveExact: true
 
 # Package links stay inside the checkout (node_modules/.pnpm), which the web app's
-# and the document service's read grants rely on.
+# read grant relies on.
 enableGlobalVirtualStore: false
-
-# The workspace's own packages aren't linked into node_modules/.pnpm/node_modules, where they'd
-# point at apps/ and packages/ from inside the document service's granted code; nothing resolves
-# them there. A checkout installed before this setting keeps those links until a fresh install
-# (`pnpm install --force`), and the document service refuses to start until then.
-hoistWorkspacePackages: false
