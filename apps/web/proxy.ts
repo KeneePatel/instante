@@ -1,16 +1,18 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { contentSecurityPolicy, newNonce } from './lib/csp.ts';
+import { API_POLICY, contentSecurityPolicy, newNonce } from './lib/csp.ts';
 import { fetchMetadataAllows } from './lib/fetch-metadata.ts';
 import { hostAllowed } from './lib/host.ts';
-import { isApi, isPrefetch } from './lib/request.ts';
+import { isApi } from './lib/request.ts';
 
 // The web app's request rules (docs/specs/platform.md, "proxy.ts"; Next.js 16's name for
 // middleware), in order:
 // 1. `Host` must be ALLOWED_HOST, read from the header (the URL's host is the server's own);
 // 2. Fetch Metadata: another site's page may only navigate to a page;
-// 3. /api passes through, to the backend's own answer; prefetches skip the CSP;
-// 4. pages get a nonce and the Content-Security-Policy, on the request and the response.
-// `accounts` adds the session refresh between 2 and 3.
+// 3. /api passes through, to the backend's own answer, with a policy that runs nothing;
+// 4. everything else gets a nonce and the pages' Content-Security-Policy, on the request and the
+//    response. Prefetches too: Next removes its router's prefetch headers before proxy.ts runs,
+//    and a page the browser prefetches itself may be shown.
+// `accounts` adds the session refresh after 4 (docs/specs/accounts.md); /api never gets it.
 
 /** A refusal in the backend's error shape, so /api's callers read it the same way. */
 function refuse(status: 421 | 403, code: 'misdirected' | 'forbidden', message: string) {
@@ -31,7 +33,11 @@ export function proxy(request: NextRequest): Response {
     page: !isApi(path),
   });
   if (!allowed) return refuse(403, 'forbidden', "Another site's page can't make this request.");
-  if (isApi(path) || isPrefetch(headers)) return NextResponse.next();
+  if (isApi(path)) {
+    const response = NextResponse.next();
+    response.headers.set('content-security-policy', API_POLICY);
+    return response;
+  }
 
   const nonce = newNonce();
   const policy = contentSecurityPolicy(nonce, { dev: process.env.NODE_ENV === 'development' });

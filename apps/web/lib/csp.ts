@@ -2,6 +2,11 @@
 // guide: a fresh nonce per request, which Next puts on its own scripts and styles. No
 // `upgrade-insecure-requests`: real use is plain http on loopback.
 
+/** What answers under /api: the backend's JSON, never a page. Should Next render HTML there
+ * instead (no route answering, as for `/_next/data/<id>/api/….json`, whose path Next reads as
+ * /api), it runs nothing. */
+export const API_POLICY = "default-src 'none'; frame-ancestors 'none'";
+
 /** A nonce: 16 random bytes, in base64. */
 export function newNonce(): string {
   return Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64');

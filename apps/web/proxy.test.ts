@@ -1,6 +1,7 @@
 import { unstable_doesMiddlewareMatch } from 'next/experimental/testing/server';
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { API_POLICY } from './lib/csp.ts';
 import { config, proxy } from './proxy.ts';
 
 // proxy.ts (docs/specs/platform.md, "proxy.ts"; T14): which requests it sees, and its rules in
@@ -42,6 +43,8 @@ describe('the matcher', () => {
       '/_next/staticky',
       '/_next/image/x',
       '/favicon.ico.html',
+      '/faviconXico',
+      '/favicon-ico',
     ]) {
       expect(matches(url), url).toBe(true);
     }
@@ -50,7 +53,13 @@ describe('the matcher', () => {
   });
 
   it('leaves out only Next’s static files, its image optimizer and the favicon', () => {
-    for (const url of ['/_next/static/chunks/main.js', '/_next/image', '/favicon.ico']) {
+    for (const url of [
+      '/_next/static/chunks/main.js',
+      '/_next/static/media/font.woff2',
+      '/_next/static/css/app.css',
+      '/_next/image',
+      '/favicon.ico',
+    ]) {
       expect(matches(url), url).toBe(false);
     }
   });
@@ -90,30 +99,57 @@ describe('proxy', () => {
     expect(
       proxy(request('/api/ping', { 'sec-fetch-site': 'same-site', ...navigation })).status,
     ).toBe(403);
-    expect(
-      proxy(request('/', { 'sec-fetch-site': 'cross-site', ...navigation }, 'POST')).status,
-    ).toBe(403);
+    for (const refused of [
+      // /api in any case: Next's rewrite to the backend ignores case.
+      request('/API/ping', { 'sec-fetch-site': 'cross-site', ...navigation }),
+      request('/', { 'sec-fetch-site': 'cross-site', ...navigation }, 'POST'),
+      // A frame, or a navigation that doesn't say where it lands.
+      request('/', { 'sec-fetch-site': 'cross-site', ...navigation, 'sec-fetch-dest': 'iframe' }),
+      request('/', { 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'navigate' }),
+      // A prefetch header changes nothing.
+      request('/', {
+        'sec-fetch-site': 'cross-site',
+        'sec-fetch-mode': 'no-cors',
+        'sec-fetch-dest': 'empty',
+        purpose: 'prefetch',
+      }),
+    ]) {
+      expect(proxy(refused).status, `${refused.method} ${refused.nextUrl.pathname}`).toBe(403);
+    }
     const followed = proxy(request('/', { 'sec-fetch-site': 'cross-site', ...navigation }));
     expect(passed(followed)).toBe(true);
     expect(policy(followed)).not.toBeNull();
   });
 
-  it('passes /api and prefetches through without a policy', () => {
-    for (const response of [
-      proxy(request('/api/ping')),
-      proxy(request('/', { 'next-router-prefetch': '1' })),
-      proxy(request('/settings', { purpose: 'prefetch' })),
-    ]) {
-      expect(passed(response)).toBe(true);
-      expect(policy(response)).toBeNull();
+  it('passes /api through, in any case, with a policy that runs nothing and no nonce', () => {
+    for (const path of ['/api/ping', '/API/ping', '/api']) {
+      const response = proxy(request(path));
+      expect(passed(response), path).toBe(true);
+      expect(policy(response), path).toBe(API_POLICY);
       expect(response.headers.get('x-middleware-request-x-nonce')).toBeNull();
+    }
+  });
+
+  it('gives a prefetch a page’s policy and nonce, as any page', () => {
+    for (const headers of [{ 'next-router-prefetch': '1' }, { purpose: 'prefetch' }]) {
+      const response = proxy(request('/settings', headers));
+      expect(passed(response)).toBe(true);
+      expect(response.headers.get('x-middleware-request-x-nonce')).toMatch(/^[A-Za-z0-9+/]{22}==$/);
+      expect(policy(response)).toContain("script-src 'self' 'nonce-");
     }
   });
 
   it('gives each page a fresh nonce, in its policy on the response and on the request Next renders', () => {
     const nonces = [request('/'), request('/settings')].map((each) => {
+      each.headers.set('cookie', 'session=1');
       const response = proxy(each);
       expect(passed(response)).toBe(true);
+      // The request Next renders keeps everything it came with, beside the nonce and policy.
+      expect(response.headers.get('x-middleware-override-headers')?.split(',')).toEqual(
+        expect.arrayContaining(['host', 'cookie', 'sec-fetch-site', 'x-nonce']),
+      );
+      expect(response.headers.get('x-middleware-request-host')).toBe(HOST);
+      expect(response.headers.get('x-middleware-request-cookie')).toBe('session=1');
       const nonce = response.headers.get('x-middleware-request-x-nonce') ?? '';
       expect(nonce).toMatch(/^[A-Za-z0-9+/]{22}==$/);
       expect(policy(response)).toContain(`script-src 'self' 'nonce-${nonce}' 'strict-dynamic';`);

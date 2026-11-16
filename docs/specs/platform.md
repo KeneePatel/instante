@@ -231,9 +231,9 @@ Every Instante process, the web server included, starts with `--disable-sigusr1`
   If `next start` needs a native addon to load `next.config.ts` under the permission model, the slice may rename it to `next.config.mjs`, with the owner's yes.
 - **`instrumentation.ts`:** `register()` compares the built-in destination with `BACKEND_INTERNAL_URL`, and exits the process when they differ.
 - **`proxy.ts`** (Next.js 16's name for middleware). Its matcher leaves out only `_next/static`, `_next/image` and `favicon.ico`, with no header conditions, so `/api` and prefetches reach it too. Per request:
-  1. **`Host`,** read from `request.headers.get('host')` (never `nextUrl.host`, which is the server's own address), must equal `ALLOWED_HOST`; otherwise `421`;
-  2. **Fetch Metadata:** a `Sec-Fetch-Site` of `cross-site` or `same-site` gets `403`, unless the request is a top-level `GET` navigation (`Sec-Fetch-Mode: navigate`) to a page;
-  3. **`/api`** stops here and passes through, so API calls get the backend's 401, never a redirect. **Prefetches** (`next-router-prefetch` or `Purpose: prefetch`) skip step 4, but still go through `accounts`' session refresh, without redirects, so a Server Component rendered for a prefetch never meets an expired token;
+  1. **`Host`,** read from `request.headers.get('host')` (never `nextUrl.host`, which is the server's own address), must equal `ALLOWED_HOST`; otherwise `421`. With no `ALLOWED_HOST`, every request gets `421`;
+  2. **Fetch Metadata:** a `Sec-Fetch-Site` of `cross-site` or `same-site` gets `403`, unless the request is a top-level `GET` navigation (`Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`, so not a frame or an embed) to a page. A request without `Sec-Fetch-Site` (no browser, or an old one) goes on;
+  3. **`/api`,** in any letter case (Next's rewrite matches `/api/:path*` without regard to case), stops here and passes through, so API calls get the backend's 401, never a redirect. Its response carries `default-src 'none'; frame-ancestors 'none'`, so should Next render a page there instead (no route answering, as for `/_next/data/<id>/api/….json`, whose path Next reads as `/api`), it runs nothing. **Prefetches** get step 4 like any page (decided in T14): Next 16.4 removes its router's prefetch headers (`next-router-prefetch`, `rsc`) before `proxy.ts` runs, so it can't tell them apart, and a page the browser prefetches itself may be shown. They still go through `accounts`' session refresh, which must tell a prefetch apart some other way to skip its redirects (A8);
   4. **pages** get a nonce per request and the `Content-Security-Policy` on the request and the response, following Next's CSP guide:
      - `default-src 'self'`;
      - `script-src 'self' 'nonce-…' 'strict-dynamic'`;
@@ -245,7 +245,7 @@ Every Instante process, the web server included, starts with `--disable-sigusr1`
 
      In development the policy also allows what Next's CSP guide lists for `next dev` (`'unsafe-eval'`), keyed on `NODE_ENV`, and a test checks that production's has none of it. `accounts` adds the session logic after this step.
 
-  The `Host`, Fetch Metadata and CSP rules are pure functions in `lib/`, unit-tested.
+  The `Host`, Fetch Metadata and CSP rules are pure functions in `lib/`, unit-tested. The matcher leaves out exactly `/_next/static/…`, `/_next/image` and `/favicon.ico`. Refusals answer in the backend's error shape (`misdirected`, `forbidden`). The policy has no `upgrade-insecure-requests`, which Next's guide has: real use is plain http on loopback (all decided in T14).
 - **The root layout** awaits `headers()`, reads `x-nonce`, and renders dynamically.
 - **The typed fetch helper,** `lib/api.ts`:
   - it builds the request from the contract, with `credentials: 'omit'`, and takes a token provider that `accounts` fills in;

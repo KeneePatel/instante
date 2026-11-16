@@ -288,7 +288,7 @@
   - **Verify:** `pnpm --filter @instante/web test`.
   - **Depends on:** T5. **Files:** `apps/web/proxy.ts`, `apps/web/lib/{host,fetch-metadata,csp}.ts`, `apps/web/lib/rules.test.ts`. **Size:** M.
   - **As built:**
-    - the rules are pure functions in `lib/{host,fetch-metadata,csp,request}.ts` (`request.ts` holds `isApi` and `isPrefetch`), tested in `lib/rules.test.ts`; `proxy.test.ts` checks the matcher with Next's `unstable_doesMiddlewareMatch` (16.4.5's name; its docs already say `unstable_doesProxyMatch`) and each rule in order through `NextRequest`. The root Vitest config has a `web` project, and the web app a `test` script;
+    - the rules are pure functions in `lib/{host,fetch-metadata,csp,request}.ts` (`request.ts` holds `isApi`), tested in `lib/rules.test.ts`; `proxy.test.ts` checks the matcher with Next's `unstable_doesMiddlewareMatch` (16.4.5's name; its docs already say `unstable_doesProxyMatch`) and each rule in order through `NextRequest`. The root Vitest config has a `web` project, and the web app a `test` script;
     - a missing `ALLOWED_HOST` refuses everything with `421`;
     - "top-level navigation" is read as `Sec-Fetch-Mode: navigate` with `Sec-Fetch-Dest: document`, so another site's frame or embed gets `403` too; requests without `Sec-Fetch-Site` (no browser, or an old one) and `same-origin` or `none` pass;
     - the refusals answer in the backend's error shape (`{ error: { code, message } }`, `misdirected` and `forbidden`), so `/api`'s callers read them the same way;
@@ -296,6 +296,13 @@
     - the CSP has no `upgrade-insecure-requests`, which Next's guide has: real use is plain http on loopback;
     - checked on the built app with `curl`: the right `Host` gets the policy with a fresh nonce, another gets `421` (on `/api` too), another site's fetch `403`, its navigation to a page `200`;
     - until T15 makes the root layout dynamic, `next build` still prerenders the two placeholder pages, whose scripts carry no nonce, so the policy blocks them in a production run.
+  - **Review (fixed):** three reviewers (bypassing `proxy.ts` on the built server, the tests by mutation, the spec and docs), a skeptic per finding and a critic; 17 of 19 held:
+    - **`/API/…` in upper case (medium):** Next matches the `/api/:path*` rewrite without regard to case, so once T15 adds it, another site's navigation to `/API/x` would have passed rule 2 as a page and reached the backend, whose own check still refuses it. `isApi` now ignores case;
+    - **prefetches never skipped the CSP (medium):** Next 16.4 removes `next-router-prefetch` before `proxy.ts` runs, and a browser's own document prefetch may be shown, so skipping its policy would be wrong. Every page now gets it; the spec's step 3 says so, and A8 carries how to tell a prefetch for its session step;
+    - **a page with no policy (high by the rubric, defence in depth):** `/_next/data/<id>/api/….json` made Next render its HTML not-found page through the `/api` pass-through, with no policy. `/api` responses now carry `default-src 'none'; frame-ancestors 'none'`; checked on the built server;
+    - **tests that didn't pin their claims:** `Sec-Fetch-Dest`'s wiring (a frame and a navigation without it), a cross-site prefetch, the forwarded request keeping its own headers, and more matcher paths;
+    - **docs:** the session step's place in the comment, T14's decisions now in the spec, and A8's Verify filter;
+    - **for the owner:** the policy's `style-src` blocks every server-rendered `style` attribute (Next's `<Image>` and default not-found page render some), and `next dev`'s own tools insert styles without a nonce, which the development variant blocks. Both are the spec's policy as written.
 
 - [ ] **T15: The web app's configuration**
   - **Does:**
@@ -568,7 +575,7 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
   - **Does:**
     - the session step on pages and prefetches:
       - a refresh when under 5 minutes are left;
-      - no redirect on a prefetch;
+      - no redirect on a prefetch, told apart some other way than its headers, which Next 16.4 removes before `proxy.ts` runs (found in T14's review: `skipProxyUrlNormalize` would keep them, its other effects to check);
       - the request let through when the key set can't be fetched;
       - redirects to the right sign-in step;
     - `lib/auth/next-path.ts`;
@@ -578,7 +585,7 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
     - the session step's outcomes are unit-tested, including a failed key-set fetch letting the request through;
     - `next=//elsewhere` returns to `/`;
     - every platform test still passes, signed in.
-  - **Verify:** `pnpm --filter @instante/web test proxy next-path`; `pnpm --filter @instante/web test:e2e`; the macOS job.
+  - **Verify:** `pnpm --filter @instante/web test proxy session`; `pnpm --filter @instante/web test:e2e`; the macOS job.
   - **Depends on:** A7. **Files:** `apps/web/proxy.ts`, `apps/web/lib/auth/next-path.ts`, `apps/web/lib/auth/session.test.ts`, `apps/web/e2e/helpers/sign-in.ts`, plus edits to the existing end-to-end specs and `macos-criteria.test.ts`. **Size:** M.
 
 - [ ] **A9: The sign-in pages**

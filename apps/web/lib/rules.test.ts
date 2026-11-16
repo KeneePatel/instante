@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { contentSecurityPolicy, newNonce } from './csp.ts';
+import { API_POLICY, contentSecurityPolicy, newNonce } from './csp.ts';
 import { fetchMetadataAllows, type FetchMetadata } from './fetch-metadata.ts';
 import { hostAllowed } from './host.ts';
-import { isApi, isPrefetch } from './request.ts';
+import { isApi } from './request.ts';
 
 // The web app's request rules (docs/specs/platform.md, "proxy.ts"; T14), as pure functions:
 // proxy.ts applies them in this order, and proxy.test.ts checks it does.
@@ -90,23 +90,14 @@ describe('fetchMetadataAllows', () => {
   });
 });
 
-describe('isApi and isPrefetch', () => {
-  it('knows /api and what’s under it, nothing that only starts like it', () => {
-    expect(isApi('/api')).toBe(true);
-    expect(isApi('/api/ping')).toBe(true);
-    expect(isApi('/api/')).toBe(true);
-    expect(isApi('/apis')).toBe(false);
-    expect(isApi('/apiary/x')).toBe(false);
-    expect(isApi('/')).toBe(false);
-    expect(isApi('/x/api/ping')).toBe(false);
-  });
-
-  it('knows a prefetch by either header Next or a browser sends', () => {
-    expect(isPrefetch(new Headers({ 'next-router-prefetch': '1' }))).toBe(true);
-    expect(isPrefetch(new Headers({ purpose: 'prefetch' }))).toBe(true);
-    expect(isPrefetch(new Headers({ purpose: 'Prefetch' }))).toBe(true);
-    expect(isPrefetch(new Headers({ purpose: 'preview' }))).toBe(false);
-    expect(isPrefetch(new Headers())).toBe(false);
+describe('isApi', () => {
+  it('knows /api and what’s under it, in any case, as Next’s rewrite does, and nothing that only starts like it', () => {
+    for (const path of ['/api', '/api/', '/api/ping', '/API', '/API/ping', '/Api/x/y', '/aPi']) {
+      expect(isApi(path), path).toBe(true);
+    }
+    for (const path of ['/apis', '/APIs', '/apiary/x', '/', '/x/api/ping', '/ap', '/api.json']) {
+      expect(isApi(path), path).toBe(false);
+    }
   });
 });
 
@@ -140,6 +131,10 @@ describe('contentSecurityPolicy', () => {
     expect(contentSecurityPolicy('n', { dev: false })).not.toContain('unsafe');
     // Production's policy is development's without the eval, and nothing else.
     expect(dev.replace(" 'unsafe-eval'", '')).toBe(contentSecurityPolicy('n', { dev: false }));
+  });
+
+  it('gives /api a policy that runs nothing, should Next render a page there', () => {
+    expect(API_POLICY).toBe("default-src 'none'; frame-ancestors 'none'");
   });
 
   it('never upgrades to https: real use is plain http on loopback', () => {

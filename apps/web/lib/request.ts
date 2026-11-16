@@ -1,14 +1,8 @@
 // What a request is, as proxy.ts sorts them (docs/specs/platform.md, "proxy.ts").
 
-/** Whether a path is the backend's, which the web app passes through: `/api` and below. */
+/** Whether a path is the backend's, which the web app passes through: `/api` and below, in
+ * any case, since Next matches the `/api/:path*` rewrite without regard to case. */
 export function isApi(path: string): boolean {
-  return path === '/api' || path.startsWith('/api/');
-}
-
-/** Whether Next's router (`next-router-prefetch`) or the browser (`Purpose: prefetch`) is
- * fetching a page ahead of a visit. */
-export function isPrefetch(headers: Headers): boolean {
-  return (
-    headers.has('next-router-prefetch') || headers.get('purpose')?.toLowerCase() === 'prefetch'
-  );
+  const lower = path.toLowerCase();
+  return lower === '/api' || lower.startsWith('/api/');
 }
