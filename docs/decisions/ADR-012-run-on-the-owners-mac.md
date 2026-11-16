@@ -146,7 +146,7 @@ Accepted 2026-11-13. At the phase 2 gate the owner chose to run Instante on thei
 - **Instante runs only when started.** Scheduled collection misses the hours the Mac is off or Instante isn't running, and `job-pool`'s spec says how an overdue read catches up.
 - **One machine holds everything.** A lost Mac or a failed disk is the main risk to the data; FileVault, the dumps and Time Machine cover it.
 - **The real data shares a user account with the agents** (R9).
-- **The document service and the web app aren't sandboxed on the Mac;** the web app's permission flags are a seat belt (R2).
+- **The document service isn't sandboxed on the Mac;** its children's permission flags are a seat belt (R2). The web app runs under a `sandbox-exec` profile as well as its flags (the owner's choice, 2026-11-16, built in T19 and T22), since the release's own pnpm links defeat a path-based grant.
 - **The address is a name only this Mac knows.** A future server needs its own domain.
 - **Moving later:** the same code runs on a server. ADR-011 holds the reviewed design, and the [hosting note](../research/hosting.md) its research.
 - **The threat model** replaces its "Host and deploy" section with "The Mac" ([`threat-model.md`](../threat-model.md)).

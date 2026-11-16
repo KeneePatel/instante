@@ -221,7 +221,7 @@
     - Accepted under R2, as the threat model already says: a child can still signal the owner's processes, and make one without `--disable-sigusr1` open its debugger (every Instante process has the flag, and the child has no network to reach it).
     - Two services started at once on one stale socket can both bind, and a start that fails after binding leaves its server open. Only the owner's own processes could race there, and T22's `lockf` lock stops a second copy.
 
-- [ ] **T13: The document service's isolation checks** (**review**)
+- [x] **T13: The document service's isolation checks** (**review**)
   - **Does:**
     - the children's code: read at start and written into each job's folder, a folder whose name nothing else has, holding no symlinks, the only one a child may read (replacing the planned walk of the granted code; see "Second review (redesigned)" and "Third review");
     - the job-folder check, refusing symlinks, hard links and non-regular files;
@@ -262,7 +262,7 @@
     - **the folder rule refused a space (medium):** the spec's macOS job runs Instante in a home with a space. Only `*` and control characters are refused now (a `,` too until the fourth review: no grant names the folder any more);
     - **the floor guard's reasons were too broad (medium):** one reason line excused every removal in its file, later commits' and uncommitted ones too. Each reason now covers what its own commit removes;
     - **tests that didn't pin their claims (medium and low):** the socket folder's own checks, cleanup only after binding, refused starts leaving nothing in the folder that would hold it, the guard's per-file and per-branch scoping, and `O_NOFOLLOW`. Each has a test now, and a job folder given by another path is taken by its real one;
-    - **docs:** ADR-012's `run/` row and its symlink fact, the spec's order of start-up steps, R2's revisit trigger (recorded as met, the sandbox still to decide), timings, and comments still describing the old grants.
+    - **docs:** ADR-012's `run/` row and its symlink fact, the spec's order of start-up steps, R2's revisit trigger (recorded as met), timings, and comments still describing the old grants.
   - **Fourth review:** of the per-job code: an attacker with real children, the implementation and docs by mutation, a skeptic per finding and a critic; 10 of 11 held, and the one refuted held in part:
     - **the name can still get out (refuted as a defect, kept as a fact):** a compromised child can set its process title, or time its CPU use, and `ps` shows both to every account. With another local account planting a folder of that name, it read a planted file. That needs a second account working with the attacker, which R2 accepts on the owner's Mac; the docs no longer say no one else learns the name, and a sandbox profile would close it;
     - **the floor guard (medium):** a reason covered every later removal of the same assertion text, and a test file renamed and trimmed in one commit couldn't be vouched for under either name. Each removed line is now vouched for once, and a vouching commit is read whole, renames included;
@@ -270,9 +270,9 @@
     - **the `,` rule (low):** refused for a reason that no longer held; it's gone, and a comma is tested as fine;
     - **docs:** ADR-012's job-folder lines and the spec's `code/` wording.
   - **Carried forward:**
-    - T19 and T22: the web app's grant, the release folder, has the same flaw. The release's own `apps/backend/node_modules/@instante/contract` link lets a path that reads as inside it reach outside, `~/.instante/secrets` included. The threat model no longer claims otherwise. Options there: grant a uniquely named folder holding Next's output without links, a sandbox profile, or accept it under R2.
+    - T19, T22 and T24: the web app's grant, the release folder, has the same flaw. The release's own `apps/backend/node_modules/@instante/contract` link lets a path that reads as inside it reach outside, `~/.instante/secrets` included. The owner chose a macOS `sandbox-exec` profile around `next start` (2026-11-16), added to those tasks.
     - Parser tasks: their packages go into each job's code, bundled (rolldown 1.2.16 is already in the lockfile through vite, but would be a new direct devDependency) or copied without links (about 270 ms a job for a parser's closure of some 2,000 files, which favours a bundle), decided with the first one.
-    - R2's revisit trigger, "a sandbox profile for the document service proves easy", is met: the design check ran a 15-line `sandbox-exec` profile on macOS 27 that blocked the same escapes, at about 8 ms per child. It would need a macOS CI job to test.
+    - R2's revisit trigger, "a sandbox profile for the document service proves easy", is met: the design check ran a 15-line `sandbox-exec` profile on macOS 27 that blocked the same escapes, at about 8 ms per child. The owner chose not to add it for the children (2026-11-16), accepting under R2 the case where another local account helps a compromised child.
 
 - [ ] **T14: The web app's request rules** (**review:** `proxy.ts`'s checks)
   - **Does:**
@@ -342,6 +342,7 @@
       - the slow route's message, with its own 45-second timeout;
       - axe on every page;
       - a planted secret the flagged web process can't read;
+    - the web app's macOS `sandbox-exec` profile (the owner's choice, 2026-11-16): reads allowed only inside the release, judged by where the kernel lands, network and the rest as `next start` needs. Measured with `next start` on the Mac, with the release's own `apps/backend/node_modules/@instante/contract` link, through which a path reading as inside the release reaches a planted secret without it. The Linux jobs run the web app without it;
     - CI's end-to-end job;
     - `check:full`;
     - `check:task` timed.
@@ -409,7 +410,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
     - in production, the `instante.localhost` resolution check;
     - the migrations and pg-boss checks;
     - the daily dumps, at start and from the poll loop, keeping the newest 3 and those before the last 3 releases (from `releases.log`);
-    - each process from `current` with `env -i`, absolute Node and `--disable-sigusr1`, the web app under `--permission` with the platform spec's command (`--no-experimental-sqlite` and `--freeze-flags-after-init` included);
+    - each process from `current` with `env -i`, absolute Node and `--disable-sigusr1`, the web app under `--permission` with the platform spec's command (`--no-experimental-sqlite` and `--freeze-flags-after-init` included), inside T19's `sandbox-exec` profile;
     - logs opened in append mode, copied and truncated past 20 MB by the poll loop, the last 10 starts kept;
     - the `lsof` loopback check;
     - the traps and the poll loop;
@@ -442,6 +443,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
       - `echo`, cookies and headers, `413`, the slow route;
       - the `Host` and Fetch Metadata refusals;
       - `selftest` and `SIGUSR1`;
+      - the web app's sandbox profile refusing a read through the release's own pnpm link;
       - the home spellings and the reserved ports in test mode.
   - **Acceptance:** platform spec 9 to 15 all pass in the macOS job.
   - **Verify:** the macOS job on the pull request.

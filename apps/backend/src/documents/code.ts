@@ -17,7 +17,8 @@ import { fileURLToPath } from 'node:url';
 // never puts its name on the child's command line, which every local account can read (`ps`).
 // A compromised child can still publish the name itself (its process title, its CPU time), so
 // another local account working with it could plant a folder of that name where the kernel can
-// be steered: the case threat-model.md accepts under R2, which a sandbox profile would close.
+// be steered: the case threat-model.md accepts under R2 (the owner chose no sandbox profile for
+// the children, which would close it).
 
 /** The children's code: each task's script and what it imports (Node's built-ins aside), as
  * paths inside `root`, a real path. */
