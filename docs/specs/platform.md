@@ -238,12 +238,13 @@ Every Instante process, the web server included, starts with `--disable-sigusr1`
      - `default-src 'self'`;
      - `script-src 'self' 'nonce-…' 'strict-dynamic'`;
      - `style-src 'self' 'nonce-…'`;
+     - `style-src-attr 'unsafe-inline'`: style attributes, which run no script, and which React renders on the server without restoring any a policy blocks (Next's `<Image>`, shadcn's components; the owner's choice, 2026-11-16);
      - `img-src 'self' data: blob:`;
      - `connect-src 'self'`, plus the Supabase address that `accounts` adds;
      - `frame-src blob:`;
      - `object-src 'none'`, `frame-ancestors 'none'`, `base-uri 'none'`, `form-action 'self'`.
 
-     In development the policy also allows what Next's CSP guide lists for `next dev` (`'unsafe-eval'`), keyed on `NODE_ENV`, and a test checks that production's has none of it. `accounts` adds the session logic after this step.
+     In development the policy also allows what `next dev` needs, keyed on `NODE_ENV`: `'unsafe-eval'`, which Next's CSP guide lists, and `style-src 'self' 'unsafe-inline'` with no nonce, since Next 16.4's own dev tools insert styles without one (the owner's choice, 2026-11-16). A test checks that production's policy has neither. `accounts` adds the session logic after this step.
 
   The `Host`, Fetch Metadata and CSP rules are pure functions in `lib/`, unit-tested. The matcher leaves out exactly `/_next/static/…`, `/_next/image` and `/favicon.ico`. Refusals answer in the backend's error shape (`misdirected`, `forbidden`). The policy has no `upgrade-insecure-requests`, which Next's guide has: real use is plain http on loopback (all decided in T14).
 - **The root layout** awaits `headers()`, reads `x-nonce`, and renders dynamically.

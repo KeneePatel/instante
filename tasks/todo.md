@@ -302,7 +302,7 @@
     - **a page with no policy (high by the rubric, defence in depth):** `/_next/data/<id>/api/….json` made Next render its HTML not-found page through the `/api` pass-through, with no policy. `/api` responses now carry `default-src 'none'; frame-ancestors 'none'`; checked on the built server;
     - **tests that didn't pin their claims:** `Sec-Fetch-Dest`'s wiring (a frame and a navigation without it), a cross-site prefetch, the forwarded request keeping its own headers, and more matcher paths;
     - **docs:** the session step's place in the comment, T14's decisions now in the spec, and A8's Verify filter;
-    - **for the owner:** the policy's `style-src` blocks every server-rendered `style` attribute (Next's `<Image>` and default not-found page render some), and `next dev`'s own tools insert styles without a nonce, which the development variant blocks. Both are the spec's policy as written.
+    - **decided by the owner (2026-11-16):** the policy's `style-src` blocked every server-rendered `style` attribute (Next's `<Image>`, its default not-found page, shadcn's sidebar), which React doesn't restore, so `style-src-attr 'unsafe-inline'` allows attributes, which run no script; and `next dev`'s own tools insert styles without a nonce, so development's `style-src` is `'self' 'unsafe-inline'`, with no nonce. Production's policy has no other `unsafe`.
 
 - [ ] **T15: The web app's configuration**
   - **Does:**

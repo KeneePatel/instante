@@ -102,12 +102,13 @@ describe('isApi', () => {
 });
 
 describe('contentSecurityPolicy', () => {
-  it('is the platform spec’s policy, with the nonce for scripts and styles', () => {
+  it('is the platform spec’s policy, with the nonce for scripts and styles, and style attributes allowed', () => {
     expect(contentSecurityPolicy('abc123', { dev: false })).toBe(
       [
         "default-src 'self'",
         "script-src 'self' 'nonce-abc123' 'strict-dynamic'",
         "style-src 'self' 'nonce-abc123'",
+        "style-src-attr 'unsafe-inline'",
         "img-src 'self' data: blob:",
         "connect-src 'self'",
         'frame-src blob:',
@@ -125,12 +126,24 @@ describe('contentSecurityPolicy', () => {
     ).toContain("connect-src 'self' https://auth.example.supabase.co;");
   });
 
-  it('allows eval in development only, as Next’s guide asks for next dev', () => {
-    const dev = contentSecurityPolicy('n', { dev: true });
-    expect(dev).toContain("script-src 'self' 'nonce-n' 'strict-dynamic' 'unsafe-eval';");
-    expect(contentSecurityPolicy('n', { dev: false })).not.toContain('unsafe');
-    // Production's policy is development's without the eval, and nothing else.
-    expect(dev.replace(" 'unsafe-eval'", '')).toBe(contentSecurityPolicy('n', { dev: false }));
+  it('allows eval and inline styles in development only, for next dev and its own tools', () => {
+    const directives = (dev: boolean) => contentSecurityPolicy('n', { dev }).split('; ');
+    expect(directives(true)).toContain(
+      "script-src 'self' 'nonce-n' 'strict-dynamic' 'unsafe-eval'",
+    );
+    // No nonce for styles: browsers ignore 'unsafe-inline' beside one.
+    expect(directives(true)).toContain("style-src 'self' 'unsafe-inline'");
+    // In production nothing is unsafe but style attributes, which can't run script.
+    expect(directives(false).filter((each) => each.includes('unsafe'))).toEqual([
+      "style-src-attr 'unsafe-inline'",
+    ]);
+    // Production's policy is development's but for those two, and nothing else.
+    const differ = directives(true).filter((each) => !directives(false).includes(each));
+    expect(differ).toEqual([
+      "script-src 'self' 'nonce-n' 'strict-dynamic' 'unsafe-eval'",
+      "style-src 'self' 'unsafe-inline'",
+    ]);
+    expect(directives(true)).toHaveLength(directives(false).length);
   });
 
   it('gives /api a policy that runs nothing, should Next render a page there', () => {
