@@ -6,7 +6,8 @@
     "dev": "NEXT_TELEMETRY_DISABLED=1 next dev",
     "build": "NEXT_TELEMETRY_DISABLED=1 next build",
     "start": "NEXT_TELEMETRY_DISABLED=1 next start",
-    "typecheck": "NEXT_TELEMETRY_DISABLED=1 next typegen && tsc --noEmit -p ."
+    "typecheck": "NEXT_TELEMETRY_DISABLED=1 next typegen && tsc --noEmit -p .",
+    "test": "vitest run --root ../.. --project web"
   },
   "dependencies": {
     "@base-ui/react": "1.9.0",

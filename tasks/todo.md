@@ -287,6 +287,15 @@
   - **Acceptance:** each rule is unit-tested; production's CSP has nothing from the development variant (part of platform spec 7).
   - **Verify:** `pnpm --filter @instante/web test`.
   - **Depends on:** T5. **Files:** `apps/web/proxy.ts`, `apps/web/lib/{host,fetch-metadata,csp}.ts`, `apps/web/lib/rules.test.ts`. **Size:** M.
+  - **As built:**
+    - the rules are pure functions in `lib/{host,fetch-metadata,csp,request}.ts` (`request.ts` holds `isApi` and `isPrefetch`), tested in `lib/rules.test.ts`; `proxy.test.ts` checks the matcher with Next's `unstable_doesMiddlewareMatch` (16.4.5's name; its docs already say `unstable_doesProxyMatch`) and each rule in order through `NextRequest`. The root Vitest config has a `web` project, and the web app a `test` script;
+    - a missing `ALLOWED_HOST` refuses everything with `421`;
+    - "top-level navigation" is read as `Sec-Fetch-Mode: navigate` with `Sec-Fetch-Dest: document`, so another site's frame or embed gets `403` too; requests without `Sec-Fetch-Site` (no browser, or an old one) and `same-origin` or `none` pass;
+    - the refusals answer in the backend's error shape (`{ error: { code, message } }`, `misdirected` and `forbidden`), so `/api`'s callers read them the same way;
+    - the matcher leaves out exactly `/_next/static/…`, `/_next/image` and `/favicon.ico`, not every path that starts like them;
+    - the CSP has no `upgrade-insecure-requests`, which Next's guide has: real use is plain http on loopback;
+    - checked on the built app with `curl`: the right `Host` gets the policy with a fresh nonce, another gets `421` (on `/api` too), another site's fetch `403`, its navigation to a page `200`;
+    - until T15 makes the root layout dynamic, `next build` still prerenders the two placeholder pages, whose scripts carry no nonce, so the policy blocks them in a production run.
 
 - [ ] **T15: The web app's configuration**
   - **Does:**

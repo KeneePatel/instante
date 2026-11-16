@@ -7,6 +7,8 @@ export default defineConfig({
       { test: { name: 'scripts', include: ['scripts/**/*.test.ts'] } },
       { test: { name: 'contract', include: ['packages/contract/src/**/*.test.ts'] } },
       { test: { name: 'backend', include: ['apps/backend/src/**/*.test.ts'] } },
+      // The web app's request rules and proxy.ts; its pages are the end-to-end tests' (T19).
+      { test: { name: 'web', include: ['apps/web/lib/**/*.test.ts', 'apps/web/*.test.ts'] } },
       // On Postgres 18: one migrated template per run, copied by each file (test/db-harness.ts).
       {
         test: {
