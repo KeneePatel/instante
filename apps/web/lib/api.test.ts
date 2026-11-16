@@ -106,6 +106,16 @@ describe('the request', () => {
     await expect(call(item, input({ authorizationSha256: {}, bodyBytes: 7 }))).rejects.toThrow(
       "/api/items/:authorizationSha256/notes/:bodyBytes's authorizationSha256 parameter must be a string, a number or a boolean",
     );
+    // The URL would drop or climb a segment and call another route.
+    for (const value of ['', '.', '..']) {
+      await expect(
+        call(item, input({ authorizationSha256: value, bodyBytes: 7 })),
+        value,
+      ).rejects.toThrow(
+        "/api/items/:authorizationSha256/notes/:bodyBytes's authorizationSha256 parameter can't be empty, . or ..",
+      );
+    }
+    expect(new URL('/api/items/../notes/7', 'http://x').pathname).toBe('/api/notes/7');
     expect(sent).toEqual([]);
   });
 

@@ -113,12 +113,19 @@ export function createApi(options: {
   };
 }
 
-/** The route's path with its `:name` parameters filled in, each encoded. */
+/** The route's path with its `:name` parameters filled in, each encoded. A parameter that is
+ * empty, `.` or `..` is refused: encoding leaves the dots, and the URL would drop or climb a
+ * segment, calling another route. */
 function pathOf(route: RouteSpec, params: Record<string, unknown> | undefined): string {
   return route.path.replace(/:([A-Za-z_]\w*)/g, (_, name: string) => {
     const value = params?.[name];
+    const what = `${route.path}'s ${name} parameter`;
     if (value === undefined) throw new Error(`${route.path} needs its ${name} parameter`);
-    return encodeURIComponent(textOf(value, `${route.path}'s ${name} parameter`));
+    const text = textOf(value, what);
+    if (text === '' || text === '.' || text === '..') {
+      throw new Error(`${what} can't be empty, . or ..`);
+    }
+    return encodeURIComponent(text);
   });
 }
 
