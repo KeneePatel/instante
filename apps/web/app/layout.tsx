@@ -20,7 +20,7 @@ export const metadata: Metadata = {
 
 export default async function RootLayout({ children }: LayoutProps<'/'>) {
   // Reading the request makes every page render per request, so each gets proxy.ts's fresh
-  // nonce, which Next puts on its own scripts and styles (docs/specs/platform.md, "The root
+  // nonce, which Next puts on its scripts and stylesheet links (docs/specs/platform.md, "The root
   // layout"). A script of our own reads it from `x-nonce` here, once there is one.
   await headers();
   return (

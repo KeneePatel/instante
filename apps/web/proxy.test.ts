@@ -41,6 +41,8 @@ describe('the matcher', () => {
       '/_next/data/build/index.json',
       '/file.svg',
       '/_next/staticky',
+      // Image optimization is off, so this only renders the not-found page.
+      '/_next/image',
       '/_next/image/x',
       '/favicon.ico.html',
       '/faviconXico',
@@ -52,12 +54,11 @@ describe('the matcher', () => {
     expect(matches('/', { purpose: 'prefetch' })).toBe(true);
   });
 
-  it('leaves out only Next’s static files, its image optimizer and the favicon', () => {
+  it('leaves out only Next’s static files and the favicon', () => {
     for (const url of [
       '/_next/static/chunks/main.js',
       '/_next/static/media/font.woff2',
       '/_next/static/css/app.css',
-      '/_next/image',
       '/favicon.ico',
     ]) {
       expect(matches(url), url).toBe(false);
@@ -119,6 +120,20 @@ describe('proxy', () => {
     const followed = proxy(request('/', { 'sec-fetch-site': 'cross-site', ...navigation }));
     expect(passed(followed)).toBe(true);
     expect(policy(followed)).not.toBeNull();
+  });
+
+  it('answers 404 at Next’s prerendered global error page and its image optimizer, which is off', async () => {
+    for (const path of ['/_global-error', '/_global-error.rsc', '/_GLOBAL-error', '/_next/image']) {
+      const response = proxy(request(path));
+      expect(response.status, path).toBe(404);
+      expect(await response.json()).toEqual({
+        error: { code: 'not_found', message: 'Not found.' },
+      });
+    }
+    expect(passed(proxy(request('/_global-errors')))).toBe(true);
+    expect(passed(proxy(request('/_next/image/x')))).toBe(true);
+    // After the Host check, as for any request.
+    expect(proxy(request('/_next/image', { host: 'evil.example:4310' })).status).toBe(421);
   });
 
   it('passes /api through, in any case, with a policy that runs nothing and no nonce', () => {

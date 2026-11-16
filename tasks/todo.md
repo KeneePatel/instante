@@ -317,21 +317,29 @@
     - unset, the build has no rewrite and records no address: `next typegen` (in `pnpm typecheck`, CI included) loads the config in the build phase without it. `instrumentation.ts` then stops a server started with one, so a release can't run without the rewrite it needs;
     - the address the build has is inlined into the server through `next.config.ts`'s `env` (`INSTANTE_BUILT_BACKEND`). `instrumentation.ts` imports the check on the Node.js runtime only, as Next's guide does, since it calls `process.exit`, which the Edge build warns about;
     - the root layout awaits `headers()`, which makes every page dynamic; it reads `x-nonce` once a script of our own needs it (A7's browser client), since Next already puts the nonce on its own scripts and styles;
-    - the no-static check is TypeScript, like the repo's other guards: it reads `.next/prerender-manifest.json`, and passes files (`/favicon.ico`) and Next's own `/_global-error`, which Next 16.4 prerenders and shows only when the root layout itself fails;
+    - the no-static check is TypeScript, like the repo's other guards: it reads `.next/prerender-manifest.json` (version 4), counts the routes it marks as pages, and leaves out Next's own `/_global-error`, which Next always prerenders, real errors never show, and `proxy.ts` answers with `404`;
     - checked on the built server: a start with another `BACKEND_INTERNAL_URL`, or none, exits 1 with the message; with the build's own, the page's 16 scripts all carry the policy's nonce, and `/api/ping` goes through the rewrite;
-    - for `next dev`, Next reads env files from `apps/web`, not the root: `ALLOWED_HOST` and `BACKEND_INTERNAL_URL` go in `apps/web/.env.local` (git-ignored), which T25's guide should say.
+    - for `next dev`, Next reads env files from `apps/web`, not the root: `ALLOWED_HOST` and `BACKEND_INTERNAL_URL` go in `apps/web/.env.local` (git-ignored), and a changed `BACKEND_INTERNAL_URL` needs `next dev` restarted, since the rewrite is fixed when it starts (in T25's entry).
+  - **Review (fixed):** two reviewers (running it for real, the tests by mutation and the docs), a skeptic per finding and a critic; 14 of 16 held:
+    - **`/_next/image` served an unchecked page (high):** with image optimization off, Next's image handler renders the app's HTML not-found page, and T14's matcher left it out, so it had no policy and no `Host` or Fetch Metadata check. The matcher now takes it, and `proxy.ts` answers it `404` after the checks, before Next's handler tries to write its cache, which the permission model refuses;
+    - **`/_global-error` (medium):** Next's prerendered global error page is reachable at its own address, with no nonce on its scripts; real errors are rendered per request. `proxy.ts` answers it `404`, and the no-static check's reason for leaving it out says so;
+    - **the no-static check guessed (medium):** it counted any path without a dotted extension as a page; it now reads the manifest's `routeType`, and refuses a manifest that isn't version 4;
+    - **a malformed address at `next start` (low):** under the permission model, the config's throw surfaced as an SWC loading error. The config is now a function of Next's phase: it throws when building and in development, and at start leaves it to the check, which says why. Found while checking it: `next/constants` doesn't resolve under Node's own type stripping, which the production command uses, so the phase's name is written out, and a test pins it to Next's;
+    - **tests that didn't pin their claims (medium and low):** `next.config.ts` itself (the rewrite, `env`, the timeout, images, the loopback refusal by phase), more loopback spellings, the two start cases decided above, the message coming before the exit, one prerendered page;
+    - **docs:** Next's nonce isn't on the inline `<style>` of its built-in not-found and error screens (T17a now adds `global-error.tsx`, and checks a 404 and an error in production); `/api`'s empty policy covers what Next answers itself, not the backend's replies; the start-up test went to T18's production-build job; T16 and T25 carry the notes below;
+    - **checked under the production command,** with the permission model: a malformed or different address stops the server with the check's message; with the build's own, `/` gets the policy, `/_next/image` and `/_global-error` get `404`, and another `Host` gets `421`.
 
 - [ ] **T16: The typed fetch helper**
-  - **Does:** `lib/api.ts`: requests built from the contract, `credentials: 'omit'`, an injected token provider, replies parsed, `upstream_unavailable`, and `Blob` replies.
+  - **Does:** `lib/api.ts`: requests built from the contract, `credentials: 'omit'`, an injected token provider, replies parsed, `upstream_unavailable`, and `Blob` replies. Server-side requests to the backend take its address from `process.env.INSTANTE_BUILT_BACKEND`, inlined at build (T15), so they always match the `/api` rewrite; `next dev` reloads `BACKEND_INTERNAL_URL` from `.env.local` without changing the rewrite.
   - **Acceptance:** the parsing and the `upstream_unavailable` mapping are unit-tested.
   - **Verify:** `pnpm --filter @instante/web test api`.
   - **Depends on:** T5. **Files:** `apps/web/lib/api.ts`, `apps/web/lib/api.test.ts`. **Size:** S.
 
 - [ ] **T17a: The shell**
-  - **Does:** the shell's layout and navigation, with empty Inbox, Resumes, Applied and Settings pages, and the error and not-found pages.
-  - **Acceptance:** each page renders in development with the nonce and no CSP violation; axe checks them in T19.
+  - **Does:** the shell's layout and navigation, with empty Inbox, Resumes, Applied and Settings pages, and the error, not-found and global-error pages, with no inline `<style>`: Next's built-in ones put one on the page without the nonce, which production's policy blocks (found in T15's review).
+  - **Acceptance:** each page renders in development with the nonce and no CSP violation; a 404 and a thrown error log no CSP violation in a production build; axe checks them in T19.
   - **Verify:** `pnpm dev`, then each page at `http://localhost:3000`.
-  - **Depends on:** T15. **Files:** `apps/web/app/(shell)/layout.tsx`, the four small `page.tsx` files, `apps/web/app/{error,not-found}.tsx`. **Size:** M (small pages).
+  - **Depends on:** T15. **Files:** `apps/web/app/(shell)/layout.tsx`, the four small `page.tsx` files, `apps/web/app/{error,not-found,global-error}.tsx`. **Size:** M (small pages).
 
 - [ ] **T17b: The ping page and `pnpm dev`**
   - **Does:**
@@ -347,6 +355,7 @@
     - Semgrep with `--baseline-commit`;
     - ShellCheck over `scripts/`;
     - the production-build job: the build starts, `/readyz` answers, `src/` imports nothing from `test/`, the guard refuses each case, `selftest` passes on the production build, and `pnpm check:no-static` passes;
+    - in that job, the start-up test (T15): the web app built with one `BACKEND_INTERNAL_URL` and started with another, or none, exits 1 with the check's message, also with `INSTANTE_BUILT_BACKEND` set in the environment, which shows the build's address is inlined; started with its own, `/api` reaches it;
     - `.github/dependabot.yml`, for npm and GitHub Actions.
   - **Acceptance:** platform spec 7, apart from the web app's launch flags (T19).
   - **Verify:** the pull request's checks.
@@ -475,7 +484,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
 
 - [ ] **T25: Guides, runbooks and the link check**
   - **Does:**
-    - `docs/guides/development.md`;
+    - `docs/guides/development.md`, saying that for `next dev` the web app's `ALLOWED_HOST` and `BACKEND_INTERNAL_URL` go in `apps/web/.env.local` (Next reads env files from the app's folder, not the root), and that changing `BACKEND_INTERNAL_URL` needs `next dev` restarted (T15);
     - `docs/runbooks/local.md`: set up, start, release, roll back, change a secret, Homebrew and macOS upgrades, a lost Mac, a new Mac, the ruleset;
     - `docs/runbooks/database.md`;
     - the everyday commands in `AGENTS.md` §6;

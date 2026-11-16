@@ -7,7 +7,8 @@ import { isApi } from './lib/request.ts';
 // The web app's request rules (docs/specs/platform.md, "proxy.ts"; Next.js 16's name for
 // middleware), in order:
 // 1. `Host` must be ALLOWED_HOST, read from the header (the URL's host is the server's own);
-// 2. Fetch Metadata: another site's page may only navigate to a page;
+// 2. Fetch Metadata: another site's page may only navigate to a page; then /_next/image and
+//    Next's prerendered /_global-error answer 404;
 // 3. /api passes through, to the backend's own answer, with a policy that runs nothing;
 // 4. everything else gets a nonce and the pages' Content-Security-Policy, on the request and the
 //    response. Prefetches too: Next removes its router's prefetch headers before proxy.ts runs,
@@ -15,7 +16,11 @@ import { isApi } from './lib/request.ts';
 // `accounts` adds the session refresh after 4 (docs/specs/accounts.md); /api never gets it.
 
 /** A refusal in the backend's error shape, so /api's callers read it the same way. */
-function refuse(status: 421 | 403, code: 'misdirected' | 'forbidden', message: string) {
+function refuse(
+  status: 421 | 403 | 404,
+  code: 'misdirected' | 'forbidden' | 'not_found',
+  message: string,
+) {
   return Response.json({ error: { code, message } }, { status });
 }
 
@@ -33,6 +38,13 @@ export function proxy(request: NextRequest): Response {
     page: !isApi(path),
   });
   if (!allowed) return refuse(403, 'forbidden', "Another site's page can't make this request.");
+  // Nothing is served at these, and each would do harm: Next prerenders its own global error
+  // page with no nonce on its scripts (real errors are rendered per request), and with image
+  // optimization off, Next's image handler only renders the not-found page after trying to
+  // write its cache, which the permission model refuses.
+  if (/^\/(_global-error(\.rsc)?|_next\/image)$/i.test(path)) {
+    return refuse(404, 'not_found', 'Not found.');
+  }
   if (isApi(path)) {
     const response = NextResponse.next();
     response.headers.set('content-security-policy', API_POLICY);
@@ -49,8 +61,9 @@ export function proxy(request: NextRequest): Response {
   return response;
 }
 
-// Every request but Next's static files, image optimizer and the favicon: /api and prefetches
-// included, with no header conditions.
+// Every request but Next's static files and the favicon: /api and prefetches included, with no
+// header conditions. /_next/image too, which image optimization being off (next.config.ts) left
+// rendering an unchecked not-found page: it gets the Host and Fetch Metadata checks, then 404.
 export const config = {
-  matcher: ['/((?!_next/static/|_next/image$|favicon\\.ico$).*)'],
+  matcher: ['/((?!_next/static/|favicon\\.ico$).*)'],
 };

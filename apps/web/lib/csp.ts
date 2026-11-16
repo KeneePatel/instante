@@ -1,5 +1,6 @@
 // The pages' Content-Security-Policy (docs/specs/platform.md, "proxy.ts"), after Next's CSP
-// guide: a fresh nonce per request, which Next puts on its own scripts and styles. No
+// guide: a fresh nonce per request, which Next puts on its scripts and stylesheet links (not on
+// the inline <style> of its built-in error screens, which the app's own pages replace). No
 // `upgrade-insecure-requests`: real use is plain http on loopback.
 
 /** What answers under /api: the backend's JSON, never a page. Should Next render HTML there
