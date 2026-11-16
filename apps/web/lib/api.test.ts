@@ -2,6 +2,7 @@ import {
   EchoResponseSchema,
   PingResponseSchema,
   defineRoute,
+  fileResponse,
   routes,
   testRoutes,
 } from '@instante/contract';
@@ -44,6 +45,25 @@ const item = defineRoute({
   errors: ['not_found'],
 });
 const upload = testRoutes.echo;
+/** A reply whose body starts and then stops: with the caller's abort, or else as a dropped
+ * connection does. */
+function stopping(type: string, status: number, signal?: AbortSignal): Response {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"ok":'));
+      if (signal === undefined) {
+        queueMicrotask(() => {
+          controller.error(new TypeError('terminated'));
+        });
+      } else {
+        signal.addEventListener('abort', () => {
+          controller.error(signal.reason);
+        });
+      }
+    },
+  });
+  return new Response(body, { status, headers: { 'content-type': type } });
+}
 const pdf = testRoutes.filePdf;
 const ECHOED = { authorizationSha256: null, cookieArrived: false, bodyBytes: 3 };
 
@@ -77,6 +97,46 @@ describe('the request', () => {
     ]);
   });
 
+  it('asks the provider for the token on every call, since a session’s token changes', async () => {
+    const { fetch, sent } = fakeFetch(() => json(PING));
+    const tokens = ['first', 'second'];
+    const api = createApi({
+      base: '',
+      fetch,
+      token: () => Promise.resolve(tokens.shift() ?? null),
+    });
+    await api(routes.ping);
+    await api(routes.ping);
+    expect(
+      sent.map(({ init }) => (init.headers as Record<string, string>)['authorization']),
+    ).toEqual(['Bearer first', 'Bearer second']);
+  });
+
+  it('leaves out a query’s undefined values, sends booleans, and refuses a value with no text', async () => {
+    const { fetch, sent } = fakeFetch(() => json({ ok: true }));
+    const call = createApi({ base: '', fetch });
+    const withQuery = (query: Record<string, unknown>) =>
+      ({ query }) as Parameters<typeof call<typeof testRoutes.slow>>[1];
+    await call(testRoutes.slow, withQuery({ seconds: undefined }));
+    await call(testRoutes.slow, withQuery({ seconds: true }));
+    expect(sent.map(({ url }) => url)).toEqual(['/api/test/slow', '/api/test/slow?seconds=true']);
+    await expect(call(testRoutes.slow, withQuery({ seconds: { n: 1 } }))).rejects.toThrow(
+      "the query's seconds must be a string, a number or a boolean",
+    );
+    expect(sent).toHaveLength(2);
+  });
+
+  it('refuses a path with Hono’s other parameter forms, which it would send as they are', async () => {
+    const { fetch, sent } = fakeFetch(() => json({ ok: true }));
+    for (const path of ['/api/items/:id?', '/api/items/:id{[0-9]+}', '/api/files/*'] as const) {
+      const route = defineRoute({ ...testRoutes.userOnly, path });
+      await expect(createApi({ base: '', fetch })(route), path).rejects.toThrow(
+        `${path} has a path form only plain :name parameters stand in for`,
+      );
+    }
+    expect(sent).toEqual([]);
+  });
+
   it('fills in the path’s parameters, encoded, adds the query, and sends a JSON body', async () => {
     const { fetch, sent } = fakeFetch(() => json({ ok: true }));
     const signal = new AbortController().signal;
@@ -87,6 +147,7 @@ describe('the request', () => {
       signal,
     });
     expect(sent[0]?.url).toBe('/api/items/a%2Fb%20c%3Fd/notes/7?seconds=3');
+    expect(sent[0]?.init.signal).toBe(signal);
     expect(sent[0]?.init).toMatchObject({
       method: 'PATCH',
       headers: { accept: 'application/json', 'content-type': 'application/json' },
@@ -165,8 +226,10 @@ describe('the reply', () => {
     details: undefined,
   };
 
-  it('is parsed with the route’s schema', async () => {
+  it('is parsed with the route’s schema, and what it parses is what comes back', async () => {
     expect(await call(() => json(PING))).toEqual(PING);
+    // The schema drops what it doesn't know.
+    expect(await call(() => json({ ...PING, extra: 'dropped' }))).toEqual(PING);
   });
 
   it('turns the backend’s error into an ApiError with its code, message and details', async () => {
@@ -194,6 +257,10 @@ describe('the reply', () => {
     expect(
       await failure(call(() => json({ error: { code: 'misdirected', message: 'No.' } }, 421))),
     ).toMatchObject({ code: 'misdirected', status: 421 });
+    // The status the reply came with, whatever its code's usual one.
+    expect(
+      await failure(call(() => json({ error: { code: 'forbidden', message: 'No.' } }, 409))),
+    ).toMatchObject({ code: 'forbidden', status: 409 });
   });
 
   it('is “can’t reach its server” for a 5xx, a non-JSON reply, a reply that doesn’t parse, or no reply', async () => {
@@ -231,21 +298,98 @@ describe('the reply', () => {
         api(() => new Response('<html></html>', { headers: { 'content-type': 'text/html' } })),
       ),
     ).toEqual(unreachable);
+    // Its media type in any case and with parameters, on either side.
+    const loose = defineRoute({ ...pdf, response: fileResponse('Application/PDF; x=y') });
+    const reply = () =>
+      new Response('%PDF', { headers: { 'content-type': 'application/pdf; charset=binary' } });
+    expect(await createApi({ base: '', fetch: fakeFetch(reply).fetch })(loose)).toBeInstanceOf(
+      Blob,
+    );
+    // A file route's errors are the contract's, as any route's.
+    expect(
+      await failure(
+        api(() => json({ error: { code: 'unauthenticated', message: 'Sign in.' } }, 401)),
+      ),
+    ).toMatchObject({ code: 'unauthenticated', status: 401 });
+    expect(
+      await failure(
+        api(
+          () =>
+            new Response('%PDF', { status: 404, headers: { 'content-type': 'application/pdf' } }),
+        ),
+      ),
+    ).toEqual(unreachable);
   });
 
-  it('lets the caller’s own abort through as itself', async () => {
-    const controller = new AbortController();
-    controller.abort();
-    const { fetch } = fakeFetch(() => Promise.reject(controller.signal.reason as Error));
+  it('lets the caller’s own abort through as itself, before the reply or while it’s read', async () => {
+    const before = new AbortController();
+    before.abort();
+    // The fake rejects only for the caller's own signal.
+    const fetch = (_url: string | URL | Request, init?: RequestInit) =>
+      init?.signal === before.signal
+        ? Promise.reject(before.signal.reason as Error)
+        : Promise.resolve(json(PING));
     await expect(
-      createApi({ base: '', fetch })(routes.ping, { signal: controller.signal }),
-    ).rejects.toBe(controller.signal.reason);
+      createApi({ base: '', fetch })(routes.ping, { signal: before.signal }),
+    ).rejects.toBe(before.signal.reason);
+    for (const [route, type, status] of [
+      [routes.ping, 'application/json', 200],
+      [routes.ping, 'application/json', 404],
+      [pdf, 'application/pdf', 200],
+    ] as const) {
+      const during = new AbortController();
+      // Read when the call settles, after the abort: so a reason of its own, known ahead.
+      const reason = new DOMException('Stopped.', 'AbortError');
+      const reply = stopping(type, status, during.signal);
+      const call = createApi({ base: '', fetch: fakeFetch(() => reply).fetch })(route, {
+        signal: during.signal,
+      });
+      setTimeout(() => {
+        during.abort(reason);
+      }, 0);
+      await expect(call, `${type} ${String(status)}`).rejects.toBe(reason);
+    }
+  });
+
+  it('is “can’t reach its server”, keeping the cause, when the connection fails, signal or not', async () => {
+    const live = new AbortController().signal;
+    for (const [route, type, signal] of [
+      [routes.ping, 'application/json', undefined],
+      [pdf, 'application/pdf', undefined],
+      [routes.ping, 'application/json', live],
+    ] as const) {
+      const reply = stopping(type, 200);
+      let error: unknown;
+      try {
+        await createApi({ base: '', fetch: fakeFetch(() => reply).fetch })(
+          route,
+          ...(signal === undefined ? [] : [{ signal }]),
+        );
+      } catch (thrown) {
+        error = thrown;
+      }
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error).toMatchObject({ code: 'upstream_unavailable', name: 'ApiError' });
+      expect((error as ApiError).cause).toEqual(new TypeError('terminated'));
+    }
+    const failed = new TypeError('fetch failed');
+    const call = createApi({ base: '', fetch: () => Promise.reject(failed) })(routes.ping, {
+      signal: live,
+    });
+    await expect(call).rejects.toMatchObject({ code: 'upstream_unavailable', cause: failed });
+  });
+
+  it('gives an ApiError its code’s usual status when none is given', () => {
+    expect(new ApiError('not_found', 'x').status).toBe(404);
+    expect(new ApiError('upstream_unavailable', UNREACHABLE).status).toBe(502);
   });
 });
 
 describe('serverBase', () => {
   it('is the backend address the build has, so a Server Component’s call matches the rewrite', () => {
     vi.stubEnv('INSTANTE_BUILT_BACKEND', 'http://127.0.0.1:4311');
+    // next dev reloads this from .env.local, but the rewrite keeps the build's.
+    vi.stubEnv('BACKEND_INTERNAL_URL', 'http://127.0.0.1:9999');
     expect(serverBase()).toBe('http://127.0.0.1:4311');
   });
 

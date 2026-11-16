@@ -77,8 +77,8 @@ Neither is a `NEXT_PUBLIC_` value: those are frozen into the build, and a build 
     - If the key set can't be fetched (Supabase down or paused), it lets the request through. The backend still verifies every call with its own key cache, so a signed-in person keeps working.
   - **`next`:** accepted only when it matches `^/(?![/\\])` and a known route; otherwise sign-in returns to `/`.
   - **The CSP:** the Supabase project's address joins `connect-src`.
-- **The token provider** for `apiFetch`, the only code that calls `getSession()`:
-  - in the browser, it takes the session's access token, and after a 401 lets the client refresh once and retries once;
+- **The token provider** passed to `createApi` (`lib/api.ts`), the only code that calls `getSession()`:
+  - in the browser, it takes the session's access token; after a 401, the browser's `Api`, which A7 wraps around `createApi`'s, lets the client refresh once and retries once, asking the provider again;
   - in Server Components, it reads the token `proxy.ts` just checked, and a 401 redirects to `/sign-in`.
 - **Pages:**
   - `/sign-in`, which takes the email, then the code;

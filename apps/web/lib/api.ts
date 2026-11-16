@@ -19,7 +19,8 @@ import {
 /** What a page shows when the backend can't be reached or answers with no sense. */
 export const UNREACHABLE = "Instante can't reach its server right now.";
 
-/** A call that failed: one of the contract's error codes, with the status it came with. */
+/** A call that failed: one of the contract's error codes, with the reply's status for the
+ * contract's own errors, and 502 for `upstream_unavailable`. */
 export class ApiError extends Error {
   readonly code: ErrorCode;
   readonly status: number;
@@ -91,7 +92,8 @@ export function createApi(options: {
         payload = JSON.stringify(body);
       }
     }
-    // Built before sending, so a mistake in the call is thrown as itself, not as "unreachable".
+    // Built before sending, so a mistake in the path or the query is thrown as itself, not as
+    // "unreachable".
     const url = `${options.base}${pathOf(route, params)}${queryOf(query)}`;
     let reply: Response;
     try {
@@ -109,14 +111,26 @@ export function createApi(options: {
       if (signal?.aborted === true) throw error;
       throw unreachable(error);
     }
-    return (await settle(route, reply)) as ResponseOf<typeof route>;
+    try {
+      return (await settle(route, reply)) as ResponseOf<typeof route>;
+    } catch (error) {
+      // The reply's own errors stand. A body that stops part way is the caller's abort, which
+      // comes through as itself, or the connection's, which is "unreachable".
+      if (error instanceof ApiError || signal?.aborted === true) throw error;
+      throw unreachable(error);
+    }
   };
 }
 
 /** The route's path with its `:name` parameters filled in, each encoded. A parameter that is
  * empty, `.` or `..` is refused: encoding leaves the dots, and the URL would drop or climb a
- * segment, calling another route. */
+ * segment, calling another route. Only plain `:name` parameters are filled in: Hono's other
+ * forms (`:name?`, `:name{pattern}`, `*`) would be sent as they are, so a path holding one is
+ * refused. */
 function pathOf(route: RouteSpec, params: Record<string, unknown> | undefined): string {
+  if (/[?{}*]/.test(route.path)) {
+    throw new Error(`${route.path} has a path form only plain :name parameters stand in for`);
+  }
   return route.path.replace(/:([A-Za-z_]\w*)/g, (_, name: string) => {
     const value = params?.[name];
     const what = `${route.path}'s ${name} parameter`;
@@ -160,23 +174,29 @@ async function settle(route: RouteSpec, reply: Response): Promise<unknown> {
     });
   }
   if (isFile(route.response)) {
-    const type = reply.headers.get('content-type') ?? '';
-    if (type.split(';')[0]?.trim().toLowerCase() !== route.response.contentType) {
+    if (essence(reply.headers.get('content-type')) !== essence(route.response.contentType)) {
       throw unreachable();
     }
-    return reply.blob();
+    return await reply.blob();
   }
   const parsed = route.response.safeParse(await jsonOf(reply));
   if (!parsed.success) throw unreachable();
   return parsed.data;
 }
 
-/** The reply's JSON, or undefined when it isn't JSON. */
+/** A media type without its parameters, in lower case: `Application/PDF; x=y` is
+ * `application/pdf`. */
+function essence(type: string | null): string {
+  return (type ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
+}
+
+/** The reply's JSON, or undefined when it isn't JSON. A body that stops part way is thrown, not
+ * taken for one that isn't JSON. */
 async function jsonOf(reply: Response): Promise<unknown> {
-  const type = reply.headers.get('content-type') ?? '';
-  if (type.split(';')[0]?.trim().toLowerCase() !== 'application/json') return undefined;
+  if (essence(reply.headers.get('content-type')) !== 'application/json') return undefined;
+  const text = await reply.text();
   try {
-    return JSON.parse(await reply.text()) as unknown;
+    return JSON.parse(text) as unknown;
   } catch {
     return undefined;
   }
