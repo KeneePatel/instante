@@ -304,7 +304,7 @@
     - **docs:** the session step's place in the comment, T14's decisions now in the spec, and A8's Verify filter;
     - **decided by the owner (2026-11-16):** the policy's `style-src` blocked every server-rendered `style` attribute (Next's `<Image>`, its default not-found page, shadcn's sidebar), which React doesn't restore, so `style-src-attr 'unsafe-inline'` allows attributes, which run no script; and `next dev`'s own tools insert styles without a nonce, so development's `style-src` is `'self' 'unsafe-inline'`, with no nonce. Production's policy has no other `unsafe`.
 
-- [ ] **T15: The web app's configuration**
+- [x] **T15: The web app's configuration**
   - **Does:**
     - `next.config.ts`: the rewrite to `BACKEND_INTERNAL_URL`, `experimental.proxyTimeout: 30000`, image optimization off (or `next.config.mjs`, if T2 found the permission model needs it, with the owner's yes);
     - `instrumentation.ts`, which exits on a mismatched `BACKEND_INTERNAL_URL`;
@@ -334,6 +334,13 @@
   - **Acceptance:** the parsing and the `upstream_unavailable` mapping are unit-tested.
   - **Verify:** `pnpm --filter @instante/web test api`.
   - **Depends on:** T5. **Files:** `apps/web/lib/api.ts`, `apps/web/lib/api.test.ts`. **Size:** S.
+  - **As built:**
+    - `createApi({ base, token, fetch })` returns a function that calls one route of the contract: `api(routes.ping)`, or with `{ params, query, body, signal }` as the route declares them. `base` is `''` in the browser (its own origin, through the rewrite) or `serverBase()` on the server, which is `INSTANTE_BUILT_BACKEND`, the build's own address, and throws when the build has none;
+    - every call sends `credentials: 'omit'`, `cache: 'no-store'` and `redirect: 'error'` (the backend never redirects), `accept` as the route answers (JSON, or a file's media type), and `authorization: Bearer …` when the token provider has a token;
+    - path parameters (`:name`, as Hono writes them) are filled in encoded, and a query's defined values added; a value must be a string, a number or a boolean, and a missing parameter or a value with no text throws before anything is sent. Inputs aren't validated again here: the types hold them, and the backend validates;
+    - a 4xx with the contract's error body is an `ApiError` with its code, message, details and status; a 5xx, a reply that isn't JSON, one the route's schema refuses, an error code the contract doesn't have, or no reply at all is `upstream_unavailable`, with `UNREACHABLE` ("Instante can't reach its server right now.") as its message. The caller's own abort comes through as itself;
+    - a file route's reply must carry its media type, and comes back as a `Blob`;
+    - the web app depends on `@instante/contract` (`workspace:*`); the tests build their routes from the contract's own schemas, since the web app takes Zod only through the contract. The lockfile's `next` entry now also names `@opentelemetry/api` 1.10.0, an optional peer already in the lockfile.
 
 - [ ] **T17a: The shell**
   - **Does:** the shell's layout and navigation, with empty Inbox, Resumes, Applied and Settings pages, and the error, not-found and global-error pages, with no inline `<style>`: Next's built-in ones put one on the page without the nonce, which production's policy blocks (found in T15's review).
