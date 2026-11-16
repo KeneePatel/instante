@@ -321,7 +321,9 @@ describe('migrate', () => {
         await client.query(`DROP DATABASE ${apps}`);
       });
     }
-  });
+    // Three databases made and two dropped, each forcing a checkpoint on the owner's durable
+    // development cluster while the other integration files run: seconds, not milliseconds.
+  }, 30_000);
 
   it('keeps nothing of a migration whose record fails, so it never runs twice', async () => {
     const db = await emptyDatabase();

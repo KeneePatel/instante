@@ -39,10 +39,12 @@ beforeAll(async () => {
   db = createDb(pool);
 });
 
+// Each drop forces a checkpoint on the owner's durable development cluster, slow while the other
+// integration files run.
 afterAll(async () => {
   await pool.end();
   await dropTestDatabases();
-});
+}, 30_000);
 
 describe('the harness', () => {
   it('copies the migrated template, with the pinned locale, for instante_owner', async () => {
