@@ -229,7 +229,7 @@ Every Instante process, the web server included, starts with `--disable-sigusr1`
   - image optimization off.
 
   If `next start` needs a native addon to load `next.config.ts` under the permission model, the slice may rename it to `next.config.mjs`, with the owner's yes.
-- **`instrumentation.ts`:** `register()` compares the built-in destination with `BACKEND_INTERNAL_URL`, and exits the process when they differ.
+- **`instrumentation.ts`:** `register()` compares the built-in destination with `BACKEND_INTERNAL_URL`, and exits the process when they differ. `BACKEND_INTERNAL_URL` must be `http://127.0.0.1:<port>`. A build without it (as `next typegen` loads the config) has no rewrite, and a server started with an address then stops (decided in T15).
 - **`proxy.ts`** (Next.js 16's name for middleware). Its matcher leaves out only `_next/static`, `_next/image` and `favicon.ico`, with no header conditions, so `/api` and prefetches reach it too. Per request:
   1. **`Host`,** read from `request.headers.get('host')` (never `nextUrl.host`, which is the server's own address), must equal `ALLOWED_HOST`; otherwise `421`. With no `ALLOWED_HOST`, every request gets `421`;
   2. **Fetch Metadata:** a `Sec-Fetch-Site` of `cross-site` or `same-site` gets `403`, unless the request is a top-level `GET` navigation (`Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`, so not a frame or an embed) to a page. A request without `Sec-Fetch-Site` (no browser, or an old one) goes on;
@@ -247,7 +247,7 @@ Every Instante process, the web server included, starts with `--disable-sigusr1`
      In development the policy also allows what `next dev` needs, keyed on `NODE_ENV`: `'unsafe-eval'`, which Next's CSP guide lists, and `style-src 'self' 'unsafe-inline'` with no nonce, since Next 16.4's own dev tools insert styles without one (the owner's choice, 2026-11-16). A test checks that production's policy has neither. `accounts` adds the session logic after this step.
 
   The `Host`, Fetch Metadata and CSP rules are pure functions in `lib/`, unit-tested. The matcher leaves out exactly `/_next/static/…`, `/_next/image` and `/favicon.ico`. Refusals answer in the backend's error shape (`misdirected`, `forbidden`). The policy has no `upgrade-insecure-requests`, which Next's guide has: real use is plain http on loopback (all decided in T14).
-- **The root layout** awaits `headers()`, reads `x-nonce`, and renders dynamically.
+- **The root layout** awaits `headers()`, and so renders dynamically; it reads `x-nonce` once a script of its own needs it (Next puts the nonce on its own scripts and styles).
 - **The typed fetch helper,** `lib/api.ts`:
   - it builds the request from the contract, with `credentials: 'omit'`, and takes a token provider that `accounts` fills in;
   - it parses the reply with the route's response schema;

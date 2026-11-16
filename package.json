@@ -16,6 +16,7 @@
     "floor-guard": "node scripts/floor-guard.ts",
     "check:commits": "node scripts/check-commits.ts",
     "check:agent-settings": "node scripts/check-agent-settings.ts",
+    "check:no-static": "node scripts/check-no-static.ts",
     "check:fast": "scripts/check-fast.sh",
     "check:task": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm test:coverage && pnpm floor-guard && pnpm check:agent-settings && pnpm check:commits"
   },

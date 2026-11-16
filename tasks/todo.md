@@ -274,7 +274,7 @@
     - Parser tasks: their packages go into each job's code, bundled (rolldown 1.2.16 is already in the lockfile through vite, but would be a new direct devDependency) or copied without links (about 270 ms a job for a parser's closure of some 2,000 files, which favours a bundle), decided with the first one.
     - R2's revisit trigger, "a sandbox profile for the document service proves easy", is met: the design check ran a 15-line `sandbox-exec` profile on macOS 27 that blocked the same escapes, at about 8 ms per child. The owner chose not to add it for the children (2026-11-16), accepting under R2 the case where another local account helps a compromised child.
 
-- [ ] **T14: The web app's request rules** (**review:** `proxy.ts`'s checks)
+- [x] **T14: The web app's request rules** (**review:** `proxy.ts`'s checks)
   - **Does:**
     - `proxy.ts`:
       - its matcher leaving out only `_next/static`, `_next/image` and `favicon.ico`;
@@ -309,9 +309,17 @@
     - `next.config.ts`: the rewrite to `BACKEND_INTERNAL_URL`, `experimental.proxyTimeout: 30000`, image optimization off (or `next.config.mjs`, if T2 found the permission model needs it, with the owner's yes);
     - `instrumentation.ts`, which exits on a mismatched `BACKEND_INTERNAL_URL`;
     - the root layout awaiting `headers()` and reading `x-nonce`.
-  - **Acceptance:** `next build` lists no static page, checked by `scripts/check-no-static.sh` (which T18 runs in CI); a wrong `BACKEND_INTERNAL_URL` stops the server.
+  - **Acceptance:** `next build` lists no static page, checked by `scripts/check-no-static.ts` (`pnpm check:no-static`, which T18 runs in CI); a wrong `BACKEND_INTERNAL_URL` stops the server.
   - **Verify:** `pnpm --filter @instante/web build`; the start-up test.
-  - **Depends on:** T14. **Files:** `apps/web/{next.config.ts,instrumentation.ts}`, `apps/web/app/layout.tsx`, `scripts/check-no-static.sh`. **Size:** S.
+  - **Depends on:** T14. **Files:** `apps/web/{next.config.ts,instrumentation.ts}`, `apps/web/app/layout.tsx`, `scripts/check-no-static.ts`. **Size:** S.
+  - **As built:**
+    - `apps/web/lib/backend.ts` holds the checks, tested in `lib/backend.test.ts`. `BACKEND_INTERNAL_URL` must be `http://127.0.0.1:<port>`, or the build stops, since the backend listens on loopback only and `/api` carries the session's token;
+    - unset, the build has no rewrite and records no address: `next typegen` (in `pnpm typecheck`, CI included) loads the config in the build phase without it. `instrumentation.ts` then stops a server started with one, so a release can't run without the rewrite it needs;
+    - the address the build has is inlined into the server through `next.config.ts`'s `env` (`INSTANTE_BUILT_BACKEND`). `instrumentation.ts` imports the check on the Node.js runtime only, as Next's guide does, since it calls `process.exit`, which the Edge build warns about;
+    - the root layout awaits `headers()`, which makes every page dynamic; it reads `x-nonce` once a script of our own needs it (A7's browser client), since Next already puts the nonce on its own scripts and styles;
+    - the no-static check is TypeScript, like the repo's other guards: it reads `.next/prerender-manifest.json`, and passes files (`/favicon.ico`) and Next's own `/_global-error`, which Next 16.4 prerenders and shows only when the root layout itself fails;
+    - checked on the built server: a start with another `BACKEND_INTERNAL_URL`, or none, exits 1 with the message; with the build's own, the page's 16 scripts all carry the policy's nonce, and `/api/ping` goes through the rewrite;
+    - for `next dev`, Next reads env files from `apps/web`, not the root: `ALLOWED_HOST` and `BACKEND_INTERNAL_URL` go in `apps/web/.env.local` (git-ignored), which T25's guide should say.
 
 - [ ] **T16: The typed fetch helper**
   - **Does:** `lib/api.ts`: requests built from the contract, `credentials: 'omit'`, an injected token provider, replies parsed, `upstream_unavailable`, and `Blob` replies.
@@ -338,7 +346,7 @@
     - osv-scanner, on every run and weekly on a schedule;
     - Semgrep with `--baseline-commit`;
     - ShellCheck over `scripts/`;
-    - the production-build job: the build starts, `/readyz` answers, `src/` imports nothing from `test/`, the guard refuses each case, `selftest` passes on the production build, and `scripts/check-no-static.sh` passes;
+    - the production-build job: the build starts, `/readyz` answers, `src/` imports nothing from `test/`, the guard refuses each case, `selftest` passes on the production build, and `pnpm check:no-static` passes;
     - `.github/dependabot.yml`, for npm and GitHub Actions.
   - **Acceptance:** platform spec 7, apart from the web app's launch flags (T19).
   - **Verify:** the pull request's checks.
