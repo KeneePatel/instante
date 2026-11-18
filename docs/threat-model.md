@@ -86,6 +86,7 @@ S, T, R, I, D and E are STRIDE's spoofing, tampering, repudiation, information d
 | `proxy.ts` misses a route, or a Server Component refreshes the token and triggers reuse detection | D | The matcher covers every page, sign-in included; `proxy.ts` refreshes with 5 minutes to spare and is the only writer of the cookies | end-to-end refresh test with 120-second tokens; the development-project check |
 | A crafted `next` parameter sends the person off-site after sign-in | S | `next` accepted only as a single-slash path naming a known route | unit and end-to-end tests |
 | The rewrite points at the wrong backend | T | The destination is built into each build, and `instrumentation.ts` exits at start if `BACKEND_INTERNAL_URL` differs | start-up test |
+| An error puts personal text on a page or in the web log | I | Error pages never show an error's message: in production a server error reaches the browser as React's placeholder, and a browser's own error keeps its text. They show a server error's digest as its reference. `next start` prints a server error's message and stack to the web log, which no sanitizer reads: the first module whose Server Components render personal data decides how that log stays clean (CONSTRAINTS' Logs row) | T17a's production check; open for that module |
 
 ### The backend API
 

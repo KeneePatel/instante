@@ -230,7 +230,7 @@ Every Instante process, the web server included, starts with `--disable-sigusr1`
 
   If `next start` needs a native addon to load `next.config.ts` under the permission model, the slice may rename it to `next.config.mjs`, with the owner's yes.
 - **`instrumentation.ts`:** `register()` compares the built-in destination with `BACKEND_INTERNAL_URL`, and exits the process when they differ. `BACKEND_INTERNAL_URL` must be `http://127.0.0.1:<port>`, or the build and `next dev` stop; at `next start` the check decides, saying why. A build without it (as `next typegen` loads the config) has no rewrite, and a server started with an address then stops (decided in T15).
-- **`proxy.ts`** (Next.js 16's name for middleware). Its matcher leaves out only `_next/static`, `_next/image` and `favicon.ico`, with no header conditions, so `/api` and prefetches reach it too. Per request:
+- **`proxy.ts`** (Next.js 16's name for middleware). Its matcher leaves out only `_next/static` and `favicon.ico`, with no header conditions, so `/api` and prefetches reach it too. Per request:
   1. **`Host`,** read from `request.headers.get('host')` (never `nextUrl.host`, which is the server's own address), must equal `ALLOWED_HOST`; otherwise `421`. With no `ALLOWED_HOST`, every request gets `421`;
   2. **Fetch Metadata:** a `Sec-Fetch-Site` of `cross-site` or `same-site` gets `403`, unless the request is a top-level `GET` navigation (`Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`, so not a frame or an embed) to a page. A request without `Sec-Fetch-Site` (no browser, or an old one) goes on;
   3. **`/api`,** in any letter case (Next's rewrite matches `/api/:path*` without regard to case), stops here and passes through, so API calls get the backend's 401, never a redirect. What Next answers there itself carries `default-src 'none'; frame-ancestors 'none'`, so should it render a page there instead of passing the request to the backend (no route answering, as for `/_next/data/<id>/api/….json`, whose path Next reads as `/api`), that page runs nothing; the backend's own replies come back through the rewrite without it. **Prefetches** get step 4 like any page (decided in T14): Next 16.4 removes its router's prefetch headers (`next-router-prefetch`, `rsc`) before `proxy.ts` runs, so it can't tell them apart, and a page the browser prefetches itself may be shown. They still go through `accounts`' session refresh, which must tell a prefetch apart some other way to skip its redirects (A8);
@@ -258,6 +258,14 @@ Every Instante process, the web server included, starts with `--disable-sigusr1`
   - navigation entries for Inbox, Resumes, Applied and Settings, each showing an empty state until its module exists;
   - error and not-found pages;
   - one page that calls `GET /api/ping` from a Server Component and from a Client Component.
+
+  Decided in T17a (2026-11-18):
+  - **navigation** (the owner's choice): a side nav from `md` up and, on phones, a menu button opening the same links in a sheet, built from shadcn's Button, Sheet and Empty. Nothing is stored in the browser, and every target is 44 px on phones;
+  - **addresses:** Inbox at `/`, then `/resumes`, `/applied` and `/settings`. A section's own pages sit under its address and mark its entry current, as Settings › Account at `/settings/account` will;
+  - **titles:** `<page> · Instante`, from each page's metadata. Next's route announcer reads the title out when it changes, and doesn't move focus;
+  - **errors:** every screen brings its own `<main>` and `<h1>`. An unknown address gets the not-found page alone, and `notFound()` in a shell page gets it inside the shell. An error in a shell page shows inside the shell (`app/(shell)/error.tsx`), one elsewhere shows alone (`app/error.tsx`), and one in the root layout shows in `app/global-error.tsx`, which can't fail. They never show the error's message, only a server error's digest as its reference, which the web log prints with the error; "Try again" asks the server for the page again;
+  - **light only** for now (the owner's choice): the dark tokens stay unused;
+  - **fonts:** Geist, shadcn's Nova default, from files committed to the repository (the owner's choice, T17c), so no build fetches them.
 
 ### The local stack ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md))
 `scripts/local/` holds the owner's `instante` command. Every subcommand:

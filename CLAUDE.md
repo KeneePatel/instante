@@ -5,7 +5,7 @@
 There's no brand guide yet. Until one exists in `design/`, the web app uses shadcn/ui's defaults as the scaffold sets them up. `docs/product.md` decides what the app does; this section governs only how it looks.
 
 - **Tokens:** colours (light and dark), radii, spacing and type come only from CSS variables in the web app's global stylesheet. shadcn generates most of them. The verdict colours shadcn lacks are added there once, as `--verdict-yes`, `--verdict-maybe`, `--verdict-no` and `--verdict-unscreened` (with foreground pairs, in light and dark, each checked for 4.5:1). Never hard-code a hex value or a colour class with a fixed shade in a component.
-- **Components:** use shadcn components and their variants before writing new ones. A new component reuses the existing tokens.
+- **Components:** use shadcn components and their variants before writing new ones. A new component reuses the existing tokens. The files `shadcn add` generates in `components/ui` stay as it writes them, formatted; the token rule covers the components we write (the owner's reading, 2026-11-18).
 - **Visual rules to keep:**
   - every verdict shows colour, icon and word together (Yes, Maybe, No, Not screened);
   - "No" rows are dimmed with a token, not with opacity;
