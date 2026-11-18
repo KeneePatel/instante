@@ -329,7 +329,7 @@
     - **docs:** Next's nonce isn't on the inline `<style>` of its built-in not-found and error screens (T17a now adds `global-error.tsx`, and checks a 404 and an error in production); `/api`'s empty policy covers what Next answers itself, not the backend's replies; the start-up test went to T18's production-build job; T16 and T25 carry the notes below;
     - **checked under the production command,** with the permission model: a malformed or different address stops the server with the check's message; with the build's own, `/` gets the policy, `/_next/image` and `/_global-error` get `404`, and another `Host` gets `421`.
 
-- [ ] **T16: The typed fetch helper**
+- [x] **T16: The typed fetch helper**
   - **Does:** `lib/api.ts`: requests built from the contract, `credentials: 'omit'`, an injected token provider, replies parsed, `upstream_unavailable`, and `Blob` replies. Server-side requests to the backend take its address from `process.env.INSTANTE_BUILT_BACKEND`, inlined at build (T15), so they always match the `/api` rewrite; `next dev` reloads `BACKEND_INTERNAL_URL` from `.env.local` without changing the rewrite.
   - **Acceptance:** the parsing and the `upstream_unavailable` mapping are unit-tested.
   - **Verify:** `pnpm --filter @instante/web test api`.
