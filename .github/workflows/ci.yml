@@ -273,3 +273,6 @@ jobs:
         env:
           BEFORE: ${{ github.event.before }}
         run: bash scripts/ci/semgrep.sh
+      # The baseline above only runs once a change touches a file with an older finding.
+      - name: The baseline drops a finding the base had, and keeps a new one
+        run: bash scripts/ci/semgrep-canary.sh

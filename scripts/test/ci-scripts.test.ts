@@ -242,6 +242,7 @@ describe('shellcheck.sh', () => {
     expect(result.output).toContain('ShellCheck 0.11.0');
     expect(readFileSync(args, 'utf8').trim().split('\n').sort()).toEqual([
       '--',
+      '--norc',
       'scripts/a.sh',
       'scripts/c',
       'scripts/local/instante',
@@ -345,5 +346,54 @@ describe('osv-scan.sh', () => {
     const result = scan(clean, exit);
     expect(result.status).toBe(2);
     expect(result.output).toContain(`osv-scanner failed with exit ${String(exit)}`);
+  });
+});
+
+describe('semgrep-canary.sh', () => {
+  // A docker that answers each call with the next exit code given, recording its arguments;
+  // CI runs the real image.
+  function canary(codes: number[]) {
+    const dir = scratch();
+    writeFileSync(path.join(dir, 'codes'), `${codes.join('\n')}\n`);
+    const bin = stubs({
+      docker: [
+        'n=$(( $(cat "$DIR/count" 2>/dev/null || echo 0) + 1 ))',
+        'echo "$n" > "$DIR/count"',
+        'printf "%s\\n" "$@" > "$DIR/args.$n"',
+        'exit "$(sed -n "${n}p" "$DIR/codes")"',
+      ].join('\n'),
+    });
+    const result = run('semgrep-canary.sh', [], {
+      env: {
+        PATH: `${bin}:/usr/bin:/bin`,
+        DIR: dir,
+        RUNNER_TEMP: dir,
+        SEMGREP_IMAGE: 'semgrep/semgrep:1@sha256:abc',
+      },
+    });
+    const args = (n: number) => readFileSync(path.join(dir, `args.${String(n)}`), 'utf8');
+    return { ...result, args };
+  }
+
+  it('passes when the base’s finding passes and a new one fails', () => {
+    const result = canary([0, 1]);
+    expect(result.status).toBe(0);
+    const first = result.args(1).trim().split('\n');
+    expect(first).toEqual(
+      expect.arrayContaining(['--config', '/rules/canary.yml', '--error', '--strict']),
+    );
+    const base = first[first.indexOf('--baseline-commit') + 1];
+    expect(base).toMatch(/^[0-9a-f]{40}$/);
+    expect(result.args(2)).toContain(base);
+  });
+
+  it.each([
+    [[1, 1], 1, 'the base’s finding counted'],
+    [[0, 0], 1, 'a new finding missed'],
+    [[2, 1], 2, 'Semgrep itself failing'],
+  ])('fails on %j with exit %i: %s', (codes, status) => {
+    const result = canary(codes);
+    expect(result.status).toBe(status);
+    expect(result.output).toContain('expected exit 0 with the base');
   });
 });

@@ -5,6 +5,9 @@
 # pinned ShellCheck; on the Mac it's Homebrew's.
 # Exit codes: ShellCheck's own (0 no findings, 1 findings), 2 no script found or no ShellCheck.
 set -u -o pipefail
+# Neither an rc file (.shellcheckrc or shellcheckrc, in any folder above a script) nor
+# SHELLCHECK_OPTS can narrow it: --norc below, and the variable unset here.
+unset SHELLCHECK_OPTS
 
 if ! command -v shellcheck >/dev/null; then
   echo "shellcheck.sh: shellcheck isn't on PATH" >&2
@@ -32,4 +35,4 @@ if [ "${#files[@]}" -eq 0 ]; then
 fi
 shellcheck --version | sed -n 's/^version: /shellcheck.sh: ShellCheck /p'
 printf 'shellcheck.sh: checking %s\n' "${files[@]}"
-shellcheck -- "${files[@]}"
+shellcheck --norc -- "${files[@]}"

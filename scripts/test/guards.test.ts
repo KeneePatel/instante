@@ -143,6 +143,41 @@ describe('floor-guard', () => {
     ['scanner-weakened', '.semgrepignore', 'apps/\n'],
     ['scanner-weakened', 'osv-scanner.toml', '[[IgnoredVulns]]\nid = "GHSA-x"\n'],
     ['scanner-weakened', 'scripts/.shellcheckrc', 'disable=SC2086\n'],
+    // ShellCheck's directive, with another key first; Semgrep's ignore comment, short or loud.
+    ['silenced-checker', 'scripts/a.sh', k('# shell', 'check source=b.sh dis', 'able=SC2086\n')],
+    ['silenced-checker', 'src/a.ts', k('eval(x); // no', 'sem\n')],
+    ['silenced-checker', 'src/a.ts', k('eval(x); // NO', 'SEMGREP\n')],
+    // A shell script with no extension, as the launcher will be.
+    [
+      'silenced-checker',
+      'scripts/local/instante',
+      `#!/usr/bin/env bash\n# ${SC_DISABLE}=SC2086\necho $1\n`,
+    ],
+    ['scanner-weakened', 'scripts/shellcheckrc', 'disable=all\n'],
+    ['scanner-weakened', '.gitleaksignore', 'abc:src/a.ts:generic-api-key:1\n'],
+    ['scanner-weakened', '.gitleaks.toml', '[allowlist]\npaths = ["src"]\n'],
+    [
+      'scanner-weakened',
+      '.github/workflows/ci.yml',
+      k('    env:\n      SHELLCHECK', '_OPTS: -e x\n'),
+    ],
+    ['scanner-weakened', '.github/workflows/ci.yml', k('      GITLEAKS', '_CONFIG: a.toml\n')],
+    [
+      'scanner-weakened',
+      '.github/workflows/ci.yml',
+      `          gitleaks git --redact ${k('--exit-', 'code')} 0 .\n`,
+    ],
+    [
+      'scanner-weakened',
+      '.github/workflows/ci.yml',
+      `        run: bash scripts/ci/semgrep.sh ${k('|', '| true')}\n`,
+    ],
+    [
+      'scanner-weakened',
+      '.github/workflows/ci.yml',
+      `        run: bash scripts/ci/shellcheck.sh${k(';', ' exit 0')}\n`,
+    ],
+    ['scanner-weakened', 'scripts/ci/shellcheck.sh', `shellcheck ${k('--rc', 'file')} x -- a.sh\n`],
   ])('flags %s in %s', (rule, path, text) => {
     const repo = makeRepo();
     repo.write(path, text);
@@ -178,6 +213,69 @@ describe('floor-guard', () => {
     repo.write('scripts/ci/semgrep.sh', 'semgrep scan --severity ERROR --error --strict\n');
     repo.write('docs/notes.md', `${CONTINUE}, ${k('--exclude', '-rule')} and ${SC_DISABLE}\n`);
     expect(repo.run(guard)).toMatchObject({ status: 0 });
+  });
+
+  it('leaves ordinary flags alone off a scanner’s command line, and in comments', () => {
+    const repo = makeRepo();
+    repo.write('scripts/ci/list.sh', 'git ls-files --others --exclude-standard\n');
+    repo.write('scripts/ci/pack.sh', 'tar --exclude=node_modules -cf a.tar .\n');
+    repo.write(
+      'scripts/ci/shellcheck.sh',
+      k('# SHELLCHECK', '_OPTS is unset here\nunset SHELLCHECK', '_OPTS\n'),
+    );
+    repo.write(
+      '.github/workflows/ci.yml',
+      '        run: pnpm install --frozen-lockfile --offline\n',
+    );
+    expect(repo.run(guard)).toMatchObject({ status: 0 });
+  });
+
+  it('flags a file renamed into a scanner’s ignore file, though an exact rename has no lines', () => {
+    const repo = makeRepo({ 'docs/ignore-example': 'apps/\n' });
+    repo.git(['mv', 'docs/ignore-example', '.semgrepignore']);
+    repo.commit('Move the example');
+    const result = repo.run(guard);
+    expect(result.status).toBe(1);
+    expect(result.output).toContain('[scanner-weakened] .semgrepignore');
+  });
+
+  describe('the checks’ pins', () => {
+    const PINS = 'scripts/test/scanner-pins.test.ts';
+    const pins = "expect(a).toBe('x');\nconst RUNS = [\n  'run: bash scripts/ci/semgrep.sh',\n];\n";
+
+    it('flags a line taken out, and passes one moved or added', () => {
+      const repo = makeRepo({ [PINS]: pins });
+      repo.write(PINS, pins.replace("  'run: bash scripts/ci/semgrep.sh',\n", ''));
+      const loosened = repo.run(guard);
+      expect(loosened.status).toBe(1);
+      expect(loosened.output).toContain(
+        `[pin-loosened] ${PINS}: 'run: bash scripts/ci/semgrep.sh'`,
+      );
+      const [first, ...rest] = pins.trimEnd().split('\n');
+      repo.write(PINS, `${[...rest, first].join('\n')}\n`);
+      expect(repo.run(guard)).toMatchObject({ status: 0 });
+      repo.write(PINS, `${pins}expect(b).toBe('z');\n`);
+      expect(repo.run(guard)).toMatchObject({ status: 0 });
+    });
+
+    it('passes a line taken out by a commit that says why', () => {
+      const repo = makeRepo({ [PINS]: pins });
+      repo.write(PINS, pins.replace("expect(a).toBe('x');\n", "expect(a).toBe('y');\n"));
+      repo.commit(`Move the pin\n\nTests removed from ${PINS}: the value moved to the image's tag`);
+      const result = repo.run(guard);
+      expect(result.status).toBe(0);
+      expect(result.output).toContain("the value moved to the image's tag");
+    });
+
+    it('flags the file gone, deleted or renamed', () => {
+      const deleted = makeRepo({ [PINS]: pins });
+      deleted.remove(PINS);
+      expect(deleted.run(guard).output).toContain('[pin-removed]');
+      const renamed = makeRepo({ [PINS]: pins });
+      renamed.git(['mv', PINS, 'scripts/test/pins.ts']);
+      renamed.commit('Rename the pins');
+      expect(renamed.run(guard).output).toContain('[pin-removed]');
+    });
   });
 
   it('flags a change even before it is committed or added', () => {
@@ -414,6 +512,17 @@ describe('floor-guard', () => {
       const repo = makeRepo({ 'CONSTRAINTS.md': constraints });
       repo.write('CONSTRAINTS.md', constraints.replace('≥ 80%', '≥ 90%'));
       expect(repo.run(guard)).toMatchObject({ status: 0 });
+    });
+
+    // "Fails on ... 7.0 or more" is a ceiling: raising it loosens the bar.
+    it('reads a number a check fails from as a ceiling', () => {
+      const failing = `${constraints}| Dependencies | none high | fails on a CVSS score of 7.0 or more |\n`;
+      const raised = makeRepo({ 'CONSTRAINTS.md': failing });
+      raised.write('CONSTRAINTS.md', failing.replace('7.0 or more', '9.0 or more'));
+      expect(raised.run(guard).output).toContain('[threshold-loosened]');
+      const lowered = makeRepo({ 'CONSTRAINTS.md': failing });
+      lowered.write('CONSTRAINTS.md', failing.replace('7.0 or more', '4.0 or more'));
+      expect(lowered.run(guard)).toMatchObject({ status: 0 });
     });
 
     it('flags a rule removed and a new exception row', () => {

@@ -105,7 +105,11 @@ function walk(text: string): Diff {
     } else if (line.startsWith('@@')) {
       inHeader = false;
     } else if (inHeader) {
+      // A file renamed or copied into place is new where it lands, though an exact rename has
+      // no ---/+++ lines and no content.
       if (line.startsWith('new file mode')) addNew(headerPath);
+      else if (line.startsWith('rename to ')) addNew(line.slice('rename to '.length));
+      else if (line.startsWith('copy to ')) addNew(line.slice('copy to '.length));
       else if (line.startsWith('--- ')) oldFile = pathOf(line.slice(4));
       else if (line.startsWith('+++ ')) {
         const newFile = pathOf(line.slice(4));
@@ -159,7 +163,15 @@ const flag = (rule: string, where: string, text: string): void => {
   findings.push({ rule, file: where, text: text.trim().slice(0, 120) });
 };
 
-const isCode = (f: string): boolean => /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|sh|ya?ml|css)$/.test(f);
+// A shell script under scripts/ needs no extension: scripts/ci/shellcheck.sh picks it by its
+// first line, as the launcher in scripts/local/ will be.
+const startsAsShell = (f: string): boolean => {
+  if (!f.startsWith('scripts/') || /\.[^/]*$/.test(f.slice(f.lastIndexOf('/') + 1))) return false;
+  const first = existsSync(f) ? (readFileSync(f, 'utf8').split('\n', 1)[0] ?? '') : '';
+  return /^#!.*\b(ba)?sh\b/.test(first);
+};
+const isCode = (f: string): boolean =>
+  /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|sh|ya?ml|css)$/.test(f) || startsAsShell(f);
 const isTest = (f: string): boolean => /\.(test|spec)\.[cm]?[jt]sx?$/.test(f);
 const isConstraints = (f: string): boolean => f === 'CONSTRAINTS.md';
 
@@ -172,9 +184,11 @@ const SUPPRESSIONS: RegExp[] = [
   /eslint-enabl[e]/,
   /\/\*\s*(eslin[t]|global[s]?|exporte[d])\s/,
   /(istanbul|c8|v8) ignor[e]/,
-  /nosemgre[p]/,
+  // Semgrep's ignore comment, short or long, which it reads in any case.
+  /\bnose[m](gre[p])?\b/i,
   /gitleaks:allo[w]/,
-  /shellcheck\s+disabl[e]/,
+  // ShellCheck's directive key, wherever it stands among the directive's keys.
+  /\bshellchec[k]\b.*\bdisabl[e]\s*=/,
 ];
 // 2. Unfinished work.
 const STUBS: RegExp[] = [
@@ -249,8 +263,12 @@ for (const f of deleted) {
   if (vouchedDeletes.has(f)) reasoned.add(f);
   else flag('test-deleted', f, 'file deleted');
 }
+// The checks' pins (rule 10) count every line, so they're left to that rule.
+const PINS = 'scripts/test/scanner-pins.test.ts';
 for (const { file: f, text } of removed) {
-  if (!isTest(f) || deleted.includes(f) || !/\b(expect|assert)\b/.test(text)) continue;
+  if (f === PINS || !isTest(f) || deleted.includes(f) || !/\b(expect|assert)\b/.test(text)) {
+    continue;
+  }
   const moved = added.some((a) => a.file === f && a.text.trim() === text.trim());
   if (moved) continue;
   const left = vouchedLines.get(lineKey(f, text)) ?? 0;
@@ -327,18 +345,23 @@ const MAX_BEFORE =
   /(<=|<|≤|at most|maximum|\bmax\b|no more than|under|below|not grow|not exceed)\s*$/;
 const MIN_AFTER = /^\s*\S*\s*(or more|or higher|must not fall|must not drop)/;
 const MAX_AFTER = /^\s*\S*\s*(or less|or lower|must not grow|must not exceed)/;
+// After "fails on" (or "fail", "failing"), in the same clause, a number is where failing
+// starts, so its direction turns round: "fails on a score of 7.0 or more" is a ceiling.
+const FAILS_BEFORE = /\bfail(s|ed|ing)?\b[^.;:|()]*$/;
 type Direction = 'min' | 'max' | null;
 const thresholds = (t: string): { n: number; dir: Direction }[] => {
   const out: { n: number; dir: Direction }[] = [];
   for (const m of t.matchAll(/\d+(?:\.\d+)?/g)) {
     const before = t.slice(Math.max(0, m.index - 24), m.index).toLowerCase();
     const after = t.slice(m.index + m[0].length, m.index + m[0].length + 40).toLowerCase();
-    const dir: Direction =
+    const read: Direction =
       MIN_BEFORE.test(before) || MIN_AFTER.test(after)
         ? 'min'
         : MAX_BEFORE.test(before) || MAX_AFTER.test(after)
           ? 'max'
           : null;
+    const failing = FAILS_BEFORE.test(t.slice(Math.max(0, m.index - 48), m.index).toLowerCase());
+    const dir: Direction = !failing || read === null ? read : read === 'min' ? 'max' : 'min';
     out.push({ n: Number(m[0]), dir });
   }
   return out;
@@ -377,16 +400,28 @@ for (const r of removedRules) {
   if (verdict !== null) flag(verdict, r.file, `${r.text}  ->  ${a.text}`);
 }
 
-// 9. A scanner told to look at less (CONSTRAINTS.md's ShellCheck, osv-scanner and Semgrep rows):
-// its own ignore or configuration file, new or changed, even empty (a .semgrepignore replaces
-// Semgrep's defaults); a flag that skips files, rules or failures, in a workflow or the scripts
-// that run the scanners (a step's continue-on-error turns its job's check green); and a
-// workflow that stops running one of them.
-const SCANNER_CONFIG = /(^|\/)(\.shellcheckr[c]|\.semgrepignor[e]|osv-scanner\.tom[l])$/;
+// 9. A scanner told to look at less (CONSTRAINTS.md's Secrets, ShellCheck, osv-scanner and
+// Semgrep rows):
+//   - its own ignore or configuration file, new, changed or renamed into place, even empty (a
+//     .semgrepignore replaces Semgrep's defaults);
+//   - in a workflow or scripts/ci/: continue-on-error, which turns a job's check green; an
+//     environment variable that configures a scanner; on a scanner's own command line, a flag
+//     that skips files, rules or failures (elsewhere --exclude and --offline mean other
+//     things); and a workflow line that runs a scanner then goes on whatever it says;
+//   - a workflow that stops running one of them.
+// How CI runs each one exactly is pinned in scripts/test/scanner-pins.test.ts (rule 10).
+const SCANNER_CONFIG =
+  /(^|\/)(\.?shellcheckr[c]|\.semgrepignor[e]|osv-scanner\.tom[l]|\.gitleaksignor[e]|\.?gitleaks\.tom[l])$/;
 const runsScanners = (f: string): boolean =>
   /^\.github\/workflows\/[^/]+\.ya?ml$/.test(f) || f.startsWith('scripts/ci/');
+const SCANNER_SCRIPTS = new Set([
+  'scripts/ci/shellcheck.sh',
+  'scripts/ci/osv-scan.sh',
+  'scripts/ci/semgrep.sh',
+]);
+const NAMES_A_SCANNER = /\b(shellchec[k]|osv-scanne[r]|semgre[p]|gitleak[s])\b/;
+const SCANNER_ENV = /(?<!unset )\b(SHELLCHECK_OPT[S]|GITLEAKS_CONFI[G]\w*)\b/;
 const SCANNER_FLAGS: RegExp[] = [
-  /continue-on-erro[r]/,
   /-exclud[e]/,
   /--includ[e]/,
   /--no-erro[r]/,
@@ -396,17 +431,39 @@ const SCANNER_FLAGS: RegExp[] = [
 // Flags that mean something else to other tools, checked only where that scanner runs.
 const SCANNER_FLAGS_IN = new Map<string, RegExp[]>([
   ['scripts/ci/osv-scan.sh', [/--confi[g]/, /--lockfil[e]/, /(^|\s)-[L](\s|=|$)/]],
-  ['scripts/ci/shellcheck.sh', [/(^|\s)-[eS](\s|=|$)/, /--severit[y]/]],
+  ['scripts/ci/shellcheck.sh', [/(^|\s)-[eS](\s|=|$)/, /--severit[y]/, /--rcfil[e]/]],
 ]);
+const GITLEAKS_RUN = /\bgitleak[s] gi[t]\b/;
+const GITLEAKS_FLAGS: RegExp[] = [
+  /--exit-cod[e]/,
+  /--confi[g]/,
+  /(^|\s)-[ci](\s|=|$)/,
+  /--baseline-pat[h]/,
+  /--gitleaks-ignore-pat[h]/,
+  /--max-target-megabyte[s]/,
+];
 const SCANNER_RUNS = /scripts\/ci\/(osv-scan|semgrep|shellcheck)\.s[h]|gitleaks gi[t]/g;
+const RUNS_A_SCANNER = /scripts\/ci\/(osv-scan|semgrep|shellcheck)\.s[h]|\bgitleak[s] gi[t]\b/;
 for (const f of newFiles) {
   if (SCANNER_CONFIG.test(f)) flag('scanner-weakened', f, 'a scanner configuration file');
 }
 for (const { file: f, text } of added) {
   if (SCANNER_CONFIG.test(f) && !newFiles.includes(f)) flag('scanner-weakened', f, text);
-  if (!runsScanners(f)) continue;
-  for (const p of [...SCANNER_FLAGS, ...(SCANNER_FLAGS_IN.get(f) ?? [])]) {
+  // A comment line, in YAML or shell, configures nothing.
+  if (!runsScanners(f) || /^\s*#/.test(text)) continue;
+  const workflow = f.startsWith('.github/');
+  if ((workflow && /continue-on-erro[r]/.test(text)) || SCANNER_ENV.test(text)) {
+    flag('scanner-weakened', f, text);
+  }
+  const flags = SCANNER_SCRIPTS.has(f) || NAMES_A_SCANNER.test(text) ? SCANNER_FLAGS : [];
+  for (const p of [...flags, ...(SCANNER_FLAGS_IN.get(f) ?? [])]) {
     if (p.test(text)) flag('scanner-weakened', f, text);
+  }
+  if (GITLEAKS_RUN.test(text)) {
+    for (const p of GITLEAKS_FLAGS) if (p.test(text)) flag('scanner-weakened', f, text);
+  }
+  if (workflow && RUNS_A_SCANNER.test(text) && /\|\||;|&\s*$/.test(text)) {
+    flag('scanner-weakened', f, text);
   }
 }
 const stillRun = new Set(
@@ -421,6 +478,23 @@ for (const { file: f, text } of removed) {
   }
 }
 
+// 10. The checks' pins: scripts/test/scanner-pins.test.ts pins how CI runs each check (no
+// condition, failure allowed or shell of its own on a checking job, the triggers, each scanner's
+// arguments, the package.json commands CI calls, the CVSS bar). It's part of the bar: a line
+// taken out of it is flagged (a moved or blank one isn't) unless the commit that takes it out
+// says why, as for a test, and so is the file gone. Adding a pin needs no reason.
+const pinsAtBase = git(['cat-file', '-e', `${mergeBase}:${PINS}`]) !== null;
+if (pinsAtBase && !existsSync(PINS)) flag('pin-removed', PINS, 'the checks’ pins are gone');
+for (const { file: f, text, from } of removed) {
+  if ((f !== PINS && from !== PINS) || text.trim() === '' || deleted.includes(f)) continue;
+  if (added.some((a) => a.file === f && a.text.trim() === text.trim())) continue;
+  const left = vouchedLines.get(lineKey(f, text)) ?? 0;
+  if (left > 0) {
+    vouchedLines.set(lineKey(f, text), left - 1);
+    reasoned.add(f);
+  } else flag('pin-loosened', f, text);
+}
+
 for (const f of reasoned) {
   console.log(`floor-guard: tests removed from ${f}, as a commit says: ${reasons.get(f) ?? ''}`);
 }
@@ -433,6 +507,7 @@ for (const f of findings) console.error(`  [${f.rule}] ${f.file}: ${f.text}`);
 console.error(
   '\nEach lowers the bar. Fix the code, or ask the owner for an exception row in CONSTRAINTS.md.' +
     '\nA test deleted on purpose passes when the commit that removes it says why, in a line of' +
-    ' its message: `Tests removed from <file>: <reason>`, ten characters or more of reason.',
+    ' its message: `Tests removed from <file>: <reason>`, ten characters or more of reason.' +
+    ` A line taken out of ${PINS} passes the same way.`,
 );
 process.exit(1);
