@@ -104,6 +104,55 @@ jobs:
           "$RUNNER_TEMP/diff-cover/bin/diff-cover" coverage/lcov.info \
             --compare-branch=origin/main --fail-under=80
 
+  # The production build's checks (docs/specs/platform.md, criterion 7, apart from the web app's
+  # launch flags, which the end-to-end tests check): scripts/prod-build-check.sh, in production
+  # mode in a scratch home, against this Postgres through a relay on the home's socket.
+  production-build:
+    name: production-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        # The same Postgres as the checks job's.
+        image: postgres:18.6-bookworm@sha256:f1ea2a1a4fb7b68d4836be1fdcb8a6466a89b072158bf9d97663600538c294c5
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale-provider=builtin --builtin-locale=C.UTF-8 --locale=C
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s
+          --health-retries 30
+    env:
+      # A Node other than mise.toml's, for the guard's wrong-Node case: 26.12.1, released
+      # 2026-10-21, from nodejs.org/dist/v26.12.1/SHASUMS256.txt. It stays off PATH.
+      WRONG_NODE_VERSION: 26.12.1
+      WRONG_NODE_SHA256: 6170b2d474e1c626f43cff3adc118df9fe3b573258a4fc3d850c8dbc6b079bbd
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - name: Install from the lockfile
+        run: pnpm install --frozen-lockfile
+      - name: The development and test databases
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+        run: bash scripts/dev-db.sh
+      - name: A Node other than the pinned one, checksum checked
+        run: |
+          set -euo pipefail
+          bash scripts/ci/fetch-checked.sh \
+            "https://nodejs.org/dist/v${WRONG_NODE_VERSION}/node-v${WRONG_NODE_VERSION}-linux-x64.tar.xz" \
+            "$WRONG_NODE_SHA256" "$RUNNER_TEMP/wrong-node.tar.xz"
+          mkdir -p "$RUNNER_TEMP/wrong-node"
+          tar -xJf "$RUNNER_TEMP/wrong-node.tar.xz" -C "$RUNNER_TEMP/wrong-node" --strip-components=1
+          echo "WRONG_NODE=$RUNNER_TEMP/wrong-node/bin/node" >> "$GITHUB_ENV"
+      - name: The production build, started and checked
+        run: bash scripts/prod-build-check.sh
+
   guards:
     name: guards
     runs-on: ubuntu-24.04
