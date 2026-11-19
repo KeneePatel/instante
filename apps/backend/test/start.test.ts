@@ -173,9 +173,11 @@ describe('start', () => {
     return { ...started, own: { host: `127.0.0.1:${String(port)}`, authorization: 'Bearer good' } };
   }
 
+  // Development registers them too, so `pnpm dev` shows the ping page's sample PDF; production
+  // never does (the configuration's test).
   it.each([
     ['test', 200],
-    ['development', 404],
+    ['development', 200],
   ] as const)(
     'with INSTANTE_ENV=%s, answers the test routes with %i',
     async (instanteEnv, status) => {

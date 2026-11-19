@@ -162,6 +162,7 @@ S, T, R, I, D and E are STRIDE's spoofing, tampering, repudiation, information d
 | The Mac is lost or stolen | I | FileVault and a login password (owner checklist); sessions revoked in Supabase; the Anthropic key revoked | owner checklist before the alpha |
 | The disk fails, or the data folder is deleted | D | Daily dumps; Time Machine for a copy off the Mac (owner checklist); the restore runbook, with `setup` first on a new Mac | accepted (R10) |
 | Logs fill the disk | D | The launcher keeps the last 10 starts; PostgreSQL's log rotates over a week | macOS job |
+| A page in another tab reaches `next dev`'s own endpoints during development: they answer before `proxy.ts`, at any `Host` (one opens a Node inspector on `127.0.0.1:9229`; Next's MCP endpoint is on by default) | I, E | Development only: loopback listeners and development data. Node's inspector refuses a foreign `Host` on its own port, and Next refuses a cross-site request from another origin. `next start`, which real use runs, has none of these endpoints | accepted (development; T17b) |
 
 ### Outages
 

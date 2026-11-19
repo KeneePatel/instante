@@ -381,6 +381,8 @@ The subcommands:
   - web on `127.0.0.1:3000`, opened at `http://localhost:3000`, its `ALLOWED_HOST`;
   - the backend (`ROLE=all`) on `127.0.0.1:8080`;
   - the document service on a socket in a short folder of its own under `$TMPDIR`, mode `0700`, because a checkout in a deep worktree can pass macOS's socket-path limit.
+
+  `scripts/dev.sh` (T17b) starts each from an empty environment plus its own names, with the Node `mise.toml` pins, each in its own process group; it refuses a port anything already listens on, at any address, and removes the socket folders killed runs left. Ctrl-C, or any one of the three ending, stops all three and removes the folder. The test routes are registered in development too, so the ping page's sample PDF shows.
 - **Integration tests:** each run migrates one template database, and each test file copies it (`apps/backend/test/db-harness.ts`), adding the database-level rights a copy lacks; the run drops every database it made. Unit tests (`src/**/*.test.ts`) need no database.
 - **End-to-end tests:** Playwright's `webServer` starts the production build (web, backend, document service) on loopback with `INSTANTE_ENV=test`, in CI and on the Mac alike. `accounts` adds the fake Supabase as one more test-only server.
 
