@@ -70,16 +70,20 @@ describe('web-sources', () => {
     expect(result.output).toContain(`the build holds ${file}`);
   });
 
+  // Turbopack's shape, an empty `sources` beside the sections, with the files every build has
+  // in an ordinary map: only the sections can fail it.
   it('reads the sections of an index map', () => {
     const root = build({
-      'chunks/a.js.map': {
-        sections: [
-          { map: { sources: EVERY_BUILD.map((f) => from(1, f)) } },
-          { map: { sources: [from(1, 'packages/contract/test/x.ts')] } },
-        ],
+      'chunks/a.js.map': { sources: EVERY_BUILD.map((f) => from(1, f)) },
+      'chunks/b.js.map': {
+        version: 3,
+        sources: [],
+        sections: [{ map: { sources: [from(1, 'packages/contract/test/x.ts')] } }],
       },
     });
-    expect(run(root)).toMatchObject({ status: 1 });
+    const result = run(root);
+    expect(result.status).toBe(1);
+    expect(result.output).toContain('packages/contract/test/x.ts');
   });
 
   it('fails when the maps don’t list the files every build has, so listing nothing can’t pass', () => {

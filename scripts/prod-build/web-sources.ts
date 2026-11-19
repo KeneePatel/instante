@@ -33,14 +33,18 @@ const decode = (s: string): string => {
     return s;
   }
 };
+// A map's own sources and those of its sections: Turbopack writes an index map as
+// `{"sources":[],"sections":[...]}`, so either can be empty.
 const listed = (map: unknown): string[] => {
   if (typeof map !== 'object' || map === null) return [];
   const { sources, sections } = map as { sources?: unknown; sections?: unknown };
-  if (Array.isArray(sources)) return sources.filter((s): s is string => typeof s === 'string');
-  if (Array.isArray(sections)) {
-    return sections.flatMap((s) => listed((s as { map?: unknown } | null)?.map));
-  }
-  return [];
+  const direct = Array.isArray(sources)
+    ? sources.filter((s): s is string => typeof s === 'string')
+    : [];
+  const nested = Array.isArray(sections)
+    ? sections.flatMap((s) => listed((s as { map?: unknown } | null)?.map))
+    : [];
+  return [...direct, ...nested];
 };
 
 const own = new Set<string>();
