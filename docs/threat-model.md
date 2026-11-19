@@ -133,11 +133,12 @@ S, T, R, I, D and E are STRIDE's spoofing, tampering, repudiation, information d
 
 | Abuse | Kind | Control | Proved by |
 |---|---|---|---|
-| A malicious npm release | E | pnpm blocks install scripts; `minimumReleaseAge`; exact versions pinned; few dependencies, each approved by the owner; osv-scanner | CI |
+| A malicious npm release | E | pnpm blocks install scripts; `minimumReleaseAge`; exact versions pinned; few dependencies, each approved by the owner; osv-scanner on every run and weekly, failing at high or above, a malicious package or no severity at all; Dependabot only proposes, and an update reaches `main` only when an agent re-commits it as the owner and the owner says yes (AGENTS.md) | CI; the weekly scan |
 | A malicious or hijacked GitHub Action | E | Actions pinned by commit SHA; least-privilege `permissions` per workflow | workflow review |
+| A tool a CI job downloads is swapped | E | Each is pinned to a release at least 14 days old, with its SHA-256 checked before it runs (`scripts/ci/fetch-checked.sh`); Semgrep's image by digest. Not yet: mise itself, which `jdx/mise-action` installs as the newest release older than 24 hours, unchecked, in every job | `scripts/test/ci-scripts.test.ts`; workflow review |
 | A pull request from a fork steals CI secrets | E | CI holds no secrets, since nothing deploys from it | workflow review |
 | Personal data or a secret lands in the public repository | I | The floor (no real people's data, no secrets), gitleaks with `--redact`, the real eval set kept outside the repository, review | gitleaks; floor guard |
-| The agent weakens a check to get to green | T | The floor guard and the review policy | floor guard |
+| The agent weakens a check to get to green | T | The floor guard (suppressions, skipped tests, the bar's own file, and the scanners' ignore files, flags and jobs) and the review policy | floor guard |
 
 ### The Mac ([ADR-012](decisions/ADR-012-run-on-the-owners-mac.md))
 

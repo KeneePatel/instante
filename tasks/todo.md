@@ -418,16 +418,51 @@
   - **Review (fixed):** one reviewer and a skeptic. The one finding held, low: the As built said the file drawn was the same as Google's, which it isn't literally (whole files, not subsets, and Geist Mono 1.700 against 1.701); it now says so. The reviewer found the rest as described: the bytes match the tag, served copies included; the licence's conditions are met (the licence beside the fonts and in each file's metadata, no reserved name, nothing modified or sold); the offline build; identical boxes, line heights and text widths against `main`'s build at 1280 and 375 px, and the fallback's vertical metrics unchanged; and the preloads carry the nonce.
 
 - [ ] **T18: CI's scanners and the production build**
-  - **Does:** in `ci.yml`:
-    - osv-scanner, on every run and weekly on a schedule;
+  - **Does:** in `ci.yml`, unless said otherwise:
+    - osv-scanner on every run, and weekly in `osv-weekly.yml`;
     - Semgrep with `--baseline-commit`;
     - ShellCheck over `scripts/`;
     - the production-build job: the build starts, `/readyz` answers, `src/` imports nothing from `test/`, the guard refuses each case, `selftest` passes on the production build, and `pnpm check:no-static` passes;
     - in that job, the start-up test (T15): the web app built with one `BACKEND_INTERNAL_URL` and started with another, or none, exits 1 with the check's message, also with `INSTANTE_BUILT_BACKEND` set in the environment, which shows the build's address is inlined; started with its own, `/api` reaches it;
-    - `.github/dependabot.yml`, for npm and GitHub Actions.
+    - `.github/dependabot.yml`, for npm and GitHub Actions, and how its updates reach `main`.
   - **Acceptance:** platform spec 7, apart from the web app's launch flags (T19).
-  - **Verify:** the pull request's checks.
-  - **Depends on:** T13, T15. **Files:** `.github/workflows/ci.yml`, `.github/dependabot.yml`, `scripts/prod-build-check.sh`. **Size:** S.
+  - **Verify:** the pull request's checks; after merging, `osv-weekly` run by hand on `main`, and Dependabot's first run for both ecosystems.
+  - **Depends on:** T13, T15. **Files:** `.github/workflows/{ci,osv-weekly}.yml`, `.github/dependabot.yml`, `scripts/ci/{fetch-checked,scan-base,shellcheck,install-osv-scanner,osv-scan,semgrep}.sh`, `scripts/check-osv.ts`, `scripts/prod-build-check.sh`, `scripts/prod-build/{procs.sh,web-sources.ts,pg-relay.ts,selftest.ts}`, `scripts/test/{check-osv,ci-scripts,prod-build}.test.ts`, plus edits to `scripts/floor-guard.ts`, `scripts/check-commits.ts`, `scripts/test/guards.test.ts`, `CONSTRAINTS.md` and `AGENTS.md`. **Size:** L, kept as one task (the owner's choice, 2026-11-19).
+  - **As built:**
+    - a three-reader study first (the scanners, the production build, Dependabot) and a critic. It found the task bigger than its three files, and four choices that were the owner's, who chose on 2026-11-19:
+      - **the bar is the rule text, not the stricter commands beside it:** osv-scanner as written fails on any advisory and Semgrep's `--error` on any new finding. The gate fails at CVSS 7.0 or more, or when a severity is unknown, and Semgrep counts ERROR rules only. CONSTRAINTS.md's two command cells now say so;
+      - **Semgrep runs from its image in CI,** pinned by digest; the Mac's install for `check:full` is T19's;
+      - **Dependabot only proposes:** an agent re-commits each update as the owner, CI runs, and the owner says yes before the fast-forward;
+      - **T18 stays one task,** with this wider Files list;
+    - decided here: the weekly scan in a workflow of its own (in `ci.yml` a schedule shares `main`'s `cancel-in-progress` concurrency group, so it would cancel, or be cancelled by, the push runs whose check runs `release` reads); the CI shell in `scripts/ci/`, where ShellCheck sees it and `check:full` can call it; the production build started in production mode, through a relay on the home's database socket; the new jobs blocking from their first run (a step's `continue-on-error` turns its job green, so `release` couldn't tell a warning from a pass); and the floor guard taught the scanners' escape hatches;
+    - **the scanners:**
+      - every tool is downloaded at a pinned version at least 14 days old, its SHA-256 checked (`scripts/ci/fetch-checked.sh`, HTTPS only, with retries). The pins, each read again from its source: ShellCheck 0.11.0, the Mac's version (the runner's own is apt's 0.9.0), by GitHub's digest of the release file, since the release publishes no checksum file; osv-scanner 2.7.0, by the release's own `osv-scanner_SHA256SUMS`, pinned once in `scripts/ci/install-osv-scanner.sh` for both workflows; Semgrep 1.183.0's image, by digest;
+      - **ShellCheck** checks every tracked script in `scripts/`, picked by extension or first line, so the launcher, which has no extension, will be checked too;
+      - **osv-scanner** has no threshold of its own: `scripts/check-osv.ts` reads its JSON. A group of advisories fails on a CVSS score of 7.0 or more, a HIGH or CRITICAL rating in words (a GitHub advisory with no CVSS vector, or one osv-scanner can't parse, has an empty score), a malicious package, or no severity at all. It also fails unless both of pnpm 12's lockfile documents were read (`pnpm` and `next` both listed): osv-scanner reads both only since 2.6.0, and pnpm warns that a one-document reader sees only the first;
+      - **Semgrep** reports only ERROR findings that weren't already at the base commit, with `--strict`, so a file it can't parse fails instead of passing unscanned. Its default ignores leave out `test/` folders. The base commit (`scripts/ci/scan-base.sh`, which gitleaks now shares) is the commit `main` was at before a push to `main`, and the merge base with `origin/main` otherwise;
+      - Dependabot's branches get no push run of their own, only their pull request's;
+    - **the floor guard:** a `shellcheck disable` directive is a suppression; a new or changed `.shellcheckrc`, `.semgrepignore` or `osv-scanner.toml` is flagged, even an empty one (a `.semgrepignore` replaces Semgrep's defaults; the guard now sees empty new files, which have no `---`/`+++` lines); so are flags that skip files, rules or failures in the workflows and `scripts/ci/`, `continue-on-error` included, and each scanner's own narrowing flags where it runs; and a workflow that stops running a scanner, unless another runs it. CONSTRAINTS.md's floor says so;
+    - **the production build** (`scripts/prod-build-check.sh`, ShellCheck-clean, bash 3.2), in a short `mktemp` home, in production mode:
+      - the backend's import graph, as TypeScript lists it from `main.ts` and the document tasks, holds nothing under `test/` or `e2e/` (the lint rule misses `import()` and `require()`); the web build's own sources, from its server source maps (`scripts/prod-build/web-sources.ts`), hold none either, and the maps must list the files every build has, so a Next.js that stops writing them fails;
+      - the build, with `BACKEND_INTERNAL_URL` at the backend's address, and no static page;
+      - the guard: each case is one change from the settings the stack then starts with, and must exit 78 with that problem alone (a schema problem stops the guard before its production checks): a TCP database URL and a socket elsewhere, `0.0.0.0`, `::` and a LAN address, the wrong Node for the backend and the document service (CI downloads Node 26.12.1, checksum checked, and keeps it off `PATH`), ports 4310 and 4311, the real-use host, no `--disable-sigusr1`, an inspector flag, `NODE_OPTIONS`, and the service's socket outside `run/`;
+      - T15's start-up cases, the web app started as `instante start` starts it: with another address and with none, each with and without `INSTANTE_BUILT_BACKEND`, it exits 1 with the exact message naming the build's own address;
+      - the stack, as `instante start` starts it, through `scripts/prod-build/pg-relay.ts`, a relay from the home's database socket to the Postgres on `127.0.0.1:5432`: `/readyz`, `/api/ping` through the rewrite, no test route served (`/api/test/file.pdf` gets 401), production's CSP, and `selftest` (`scripts/prod-build/selftest.ts`, the backend's own documents client);
+      - its processes (`scripts/prod-build/procs.sh`, with 12 tests) each run in a process group of its own, stopped whole: a guard or start-up case at its end or its deadline, with its output in a file rather than `$(...)`, and failing if it ends but leaves a process running; everything when the check exits or is stopped, a signal during a fork included; and, by a watchdog in a group of its own, when the check is killed outright. The first planted-defect run found why: a web app that wrongly started was killed at its deadline by its pid alone, which was `web()`'s subshell, so the server it had exec'd kept listening and holding the `$(...)` pipe open, and the check waited three hours for an end-of-file that never came. A review of the fix (three readers, a skeptic per finding, a critic) confirmed six findings and one gap, all low. Fixed and covered here: a signal between a fork and its record; a child forked as its group's KILL lands (macOS); a KILL to the check, which no longer reached the case's group (hence the watchdog); the Ctrl-C path, which had no test; the grace for a child still exiting, which had none either; and the tests' 1-second deadline, which whole-second `SECONDS` could end before the command started. The seventh, `apps/backend/test/migrate.test.ts`'s timeout leaving pg-boss's migrate child running, is older code and a follow-up. Each new test was checked to fail with its fix taken out, and a `SIGKILL` to the real check with its stack up left nothing running;
+      - run outside CI without `WRONG_NODE`, it skips that case and says so; in CI it refuses to run without it. It refuses to run beside an `apps/web/.env*` file, which `next start` would read;
+      - checked in a scratch worktree against Homebrew's cluster: every check passed but the skipped wrong Node. Seven defects, planted there one at a time, were each caught by the check meant for it:
+        - the guard accepting a database outside the socket folder: both cases still running at their deadline;
+        - a `src/` import from `test/`: the backend's import graph;
+        - `'unsafe-eval'` in production's policy: the CSP check;
+        - the build's address read at run time instead of inlined: all four start-up cases (two with the wrong message, two still running at their deadline), then the stack's web app;
+        - test routes served in production: `/api/test/file.pdf` answered 200;
+        - the document service's child started without `--permission`: `/readyz` and `selftest`;
+        - a page importing from a `test/` folder: the web build's sources;
+        - not planted: a guard accepting a listen address or a reserved port, which would have listened on every interface, or on real use's ports, on the owner's Mac;
+    - **Dependabot:** npm and GitHub Actions, weekly, with a 7-day cooldown (pnpm's `minimumReleaseAge`, which CI's frozen install enforces anyway), exact pins kept exact, and one pull request for the minor and patch updates, leaving out pg-boss (its upgrades are releases of their own) and Hono, Drizzle and TypeScript (mid-transition, ADR-002). AGENTS.md's "Dependency updates" gives the takeover: cherry-pick onto a branch of one's own, a new message, CI, the owner's yes, then close Dependabot's pull request. `check-commits` points a refused Dependabot commit there, with its exit code unchanged;
+    - checked, on the branch's first CI run: osv-scanner read 687 packages in `pnpm-lock.yaml` (pnpm's 15 and the project's 672) and found one advisory, below high (minimatch 10.2.6, GHSA-g3hv-75wg-m249, CVSS 6.9, MODERATE); Semgrep ran 310 ERROR rules over the 11 changed files and found nothing, with about 100% of lines parsed; ShellCheck found nothing; gitleaks ran on the shared base commit;
+    - for the owner, after merging: add `production-build`, `shellcheck`, `osv-scanner` and `semgrep` to `main`'s ruleset as required checks; turn on Dependabot alerts and security updates, then check that Insights → Dependency graph lists `pnpm-lock.yaml`'s packages (GitHub's docs say its graph can't read pnpm 12's two-document lockfile; a closed GitHub issue says that's fixed);
+    - noted elsewhere: T19's, T21's and T24's notes; the threat model's supply-chain rows; and, not done here, `jdx/mise-action` installing the newest mise older than 24 hours, unchecked, in every job.
 
 - [ ] **T19: End-to-end tests**
   - **Does:**
@@ -459,6 +494,11 @@
     - targets of 44 px at a phone held sideways too (for example 844x390 with touch emulation, where the side nav shows): axe's `target-size` rule checks 24 px, so it can't stand in for the 44 px rule;
     - the route announcer reads the new title on a client navigation, or the page's `<h1>` when the title hasn't arrived yet (a page that wasn't prefetched), and the title after Back or Forward;
     - an error on the Inbox itself offers only "Try again", which recovers once the cause is gone; a page whose `generateMetadata` fails is among the error cases axe runs on, which needs a title.
+  - **Notes from T18:**
+    - `check:full` runs ShellCheck and osv-scanner through `scripts/ci/shellcheck.sh` and `scripts/ci/osv-scan.sh`, as CI does, with Homebrew's ShellCheck 0.11.0 and an osv-scanner at CI's 2.7.0. CI runs Semgrep from its image (the owner's choice, 2026-11-19), and the Mac has no Docker, so `check:full` needs Semgrep 1.183.0 installed some other way: say which, and that it isn't byte for byte CI's;
+    - `next start` reads `apps/web/.env*` for every name its environment lacks, and the owner's checkout has an `apps/web/.env.local`: start the webServer with `env -i`, or refuse while such a file exists, as `scripts/prod-build-check.sh` does;
+    - `scripts/prod-build-check.sh` uses ports 4320 and 4321 too; it refuses them when they're in use, so it and the end-to-end tests can't run at once on one machine;
+    - the web app under `--permission` started on CI's Linux runner in T18's production-build job, so the launch flags work there.
 
 ### Checkpoint 3
 - [ ] Every Linux job passes on one pull request (platform spec 3).
@@ -512,6 +552,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
   - **Acceptance:** each refusal in platform spec 14 (the "Instante is running" case tested by holding the lock), and a failed build leaves `current` unchanged.
   - **Verify:** `pnpm test:local release`.
   - **Depends on:** T20. **Files:** `scripts/local/release.sh`, `scripts/local/setup.sh`, `scripts/local/test/{github-stub,release.test}.ts`. **Size:** M.
+  - **Notes from T18:** the required CI jobs, by the names their check runs carry: `install`, `checks`, `production-build`, `guards`, `gitleaks`, `shellcheck`, `osv-scanner` and `semgrep`. `osv-scanner-weekly` runs from its own workflow on `main`'s newest commit, isn't required, and isn't the commit's own CI, so it doesn't decide a release. Whether a release should refuse while the latest weekly scan is failing is open, for the owner. The owner adds the four new names to `main`'s ruleset. `cli db migrate`, which a release runs, starts `pg-boss migrate` as a child (`runPgBossMigrate`, `src/store/queue.ts`) that a signal to `main.ts` doesn't stop, since `ROLE=cli` installs no handler: a deadline on it must stop the child too, or the child keeps its owner connection. T18's review found the same gap in `apps/backend/test/migrate.test.ts`, whose 12-second timeout stops only `main.ts`.
 
 - [ ] **T22: `start`, `stop` and `status`**
   - **Does:**
@@ -559,6 +600,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
   - **Acceptance:** platform spec 9 to 15 all pass in the macOS job.
   - **Verify:** the macOS job on the pull request.
   - **Depends on:** T23. **Files:** `scripts/local/cli.sh`, `scripts/local/test/macos-criteria.test.ts`, `.github/workflows/ci.yml`. **Size:** M.
+  - **Notes from T18:** `scripts/prod-build/selftest.ts` runs `selftest` on a running stack, from the backend's own documents client, and exits 1 unless it's ok; the macOS job can call it with the release's socket, port and home.
 
 - [ ] **T25: Guides, runbooks and the link check**
   - **Does:**

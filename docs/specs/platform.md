@@ -357,19 +357,26 @@ The subcommands:
   - `scripts/floor-guard.ts`, adapted from the constraint-driven-development skill's reference (a Node script, as the reference is, so it's typed, linted and tested like the rest);
   - `scripts/dev-db.sh`, which creates the development roles on Homebrew's cluster, giving the owner role `CREATEDB` for template databases. It creates the `instante_dev` and `instante_test` databases from `template0` with the pinned locale, writes their URLs to `.dev/secrets/` (git-ignored, `0600`), and migrates both. It creates only what's missing and drops nothing, and CI runs it against its Postgres service;
   - `scripts/local/`, above, with its tests and the GitHub stub.
+  - `scripts/ci/`, the shell CI runs, where ShellCheck sees it: the checksum-checked download, the scans' base commit, and the ShellCheck, osv-scanner and Semgrep runs; with `scripts/check-osv.ts`, the dependency bar;
+  - `scripts/prod-build-check.sh`, with `scripts/prod-build/`'s helpers: `procs.sh`, which runs each of the check's processes in a process group of its own and stops the whole group (when a case ends or reaches its deadline, when the check exits or is stopped, and, by a watchdog, when the check is killed outright), and the typed ones, for the web build's sources, the database relay, and `selftest` on a running stack.
 - **`.github/workflows/ci.yml`,** on pushes and pull requests. It holds no secrets, because nothing deploys from CI. Its jobs, mostly in parallel:
   - format, lint and types;
   - unit and integration tests on a `postgres:18` service, started with `POSTGRES_INITDB_ARGS` for the pinned locale and set to Postgres's non-durable settings (`fsync`, `full_page_writes` and `synchronous_commit` off), since every `DROP DATABASE` forces a checkpoint and the runner's disk made those slow enough to time tests out; with coverage of changed lines;
   - the floor guard, and the check on committed `.claude/` settings;
   - gitleaks over git;
-  - osv-scanner, Semgrep and ShellCheck;
+  - osv-scanner, Semgrep and ShellCheck (decided in T18):
+    - ShellCheck 0.11.0, the Mac's version, over every shell script in `scripts/` (`scripts/ci/shellcheck.sh`);
+    - osv-scanner 2.7.0, judged by `scripts/check-osv.ts`, since osv-scanner has no threshold of its own: a CVSS score of 7.0 or more, a HIGH or CRITICAL rating, a malicious package or no severity at all fails, and both documents of pnpm 12's lockfile must have been read. `osv-weekly.yml` runs the same scan each Monday, in a workflow of its own, since a schedule in `ci.yml` would share `main`'s concurrency group;
+    - Semgrep 1.183.0's image, pinned by digest, for new ERROR findings since the base commit only (`scripts/ci/scan-base.sh`, shared with gitleaks), with `--strict`;
+    - every tool downloaded at a pinned version, its SHA-256 checked (`scripts/ci/fetch-checked.sh`);
+  - the production build (`scripts/prod-build-check.sh`), in production mode in a scratch home, against the Postgres service through a relay on the home's socket: criterion 7 apart from the web app's launch flags, and T15's start-up check;
   - end-to-end tests with axe, against a production build started the way `instante start` starts it. Playwright waits on the backend's `/readyz` rather than a page, since a page needs the right `Host`, and the slow-route test gets its own 45-second timeout;
   - **the local stack, on a GitHub-hosted macOS runner** with a pinned label, a timeout well under 6 hours, and older runs of the same branch cancelled:
     - it checks for `lockf`, `lsof` and `realpath`;
     - then Homebrew's `postgresql@18`;
     - then `setup`, a second `release`, `start`, the checks below, `backup`, `restore`, `rollback` and `stop`, in a short scratch `INSTANTE_HOME` whose path contains a space.
 
-  Actions are pinned by commit SHA, and each workflow has least-privilege `permissions`.
+  Actions are pinned by commit SHA, and each workflow has least-privilege `permissions`. Dependabot (`.github/dependabot.yml`, npm and GitHub Actions, weekly, with a 7-day cooldown) only proposes: its commits fail `check-commits`, so each update is re-committed as the owner and merged on the owner's yes (AGENTS.md, "Dependency updates").
 - **Docs:**
   - `docs/guides/development.md` (set-up, commands, the development roles, opening development at `http://localhost:3000`);
   - `docs/runbooks/local.md` (set up, start, release, roll back, change a secret, a Homebrew or macOS upgrade, a lost or broken Mac and a new one, the ruleset);
@@ -412,7 +419,7 @@ pnpm --filter @instante/backend cli db migrate
 
 - `check:fast` runs Prettier, untyped ESLint and gitleaks on the changed files, in under 5 seconds.
 - `check:task` adds each package's `typecheck`, typed ESLint, Vitest with coverage, and the floor guard, in under 90 seconds.
-- `check:full` adds the end-to-end tests, osv-scanner, Semgrep and ShellCheck, as CI runs them.
+- `check:full` adds the end-to-end tests, osv-scanner, Semgrep and ShellCheck, as CI runs them. CI runs Semgrep from its image, and the Mac has no Docker, so `check:full`'s Semgrep is an install of its own at the same version (T19).
 
 The owner's own commands for real use (`instante setup`, `start`, `release`, `backup`, `restore`, `status`, `cli`) run only in the owner's terminal, from `~/.instante/bin/instante`. Agents never run them.
 
@@ -423,7 +430,7 @@ instante/
   package.json  pnpm-workspace.yaml  pnpm-lock.yaml  mise.toml  .env.example
   tsconfig.base.json  eslint.config.mjs  eslint.fast.config.mjs  prettier.config.mjs
   .claude/settings.json
-  .github/workflows/ci.yml   .github/dependabot.yml
+  .github/workflows/{ci,osv-weekly}.yml   .github/dependabot.yml
   apps/
     web/                    the create-next-app scaffold (no src/ folder), plus:
       proxy.ts  instrumentation.ts  lib/{api.ts,csp.ts,host.ts,fetch-metadata.ts}  app/(shell)/…  e2e/
