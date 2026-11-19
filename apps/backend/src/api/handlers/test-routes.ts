@@ -3,7 +3,7 @@ import type { testRoutes } from '@instante/contract';
 import type { Handlers } from '../register-routes.ts';
 
 // The test-only routes that prove the walking skeleton's checks (docs/specs/platform.md).
-// They're registered only with INSTANTE_ENV=test.
+// They're registered in development and test runs, never in production.
 
 export const testRouteHandlers: Handlers<typeof testRoutes> = {
   userOnly: () => ({ ok: true }),
@@ -26,12 +26,19 @@ export const testRouteHandlers: Handlers<typeof testRoutes> = {
   filePdf: () => FIXTURE_PDF,
 };
 
+/** What the sample page draws: a dark band with "Instante" across it, so a person can see that
+ * a viewer rendered it (a blank page looks the same as a blocked one). */
+const FIXTURE_CONTENT =
+  '0.15 0.15 0.15 rg 20 70 160 60 re f BT /F1 24 Tf 1 1 1 rg 58 92 Td (Instante) Tj ET';
+
 /** A one-page PDF with a correct cross-reference table, built here so src/ needs nothing
  * from test/. */
 export const FIXTURE_PDF: Uint8Array = buildPdf([
   '<< /Type /Catalog /Pages 2 0 R >>',
   '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-  '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << >> >>',
+  '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+  `<< /Length ${String(FIXTURE_CONTENT.length)} >>\nstream\n${FIXTURE_CONTENT}\nendstream`,
+  '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
 ]);
 
 function buildPdf(objects: string[]): Uint8Array {

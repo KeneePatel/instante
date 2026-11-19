@@ -35,7 +35,10 @@ export function contentSecurityPolicy(
     `connect-src ${["'self'", ...(options.connect ?? [])].join(' ')}`,
     'frame-src blob:',
     "object-src 'none'",
-    "frame-ancestors 'none'",
+    // 'self', not 'none' (the owner's choice, 2026-11-18): WebKit applies the page's
+    // frame-ancestors to a blob: document it frames, so 'none' left a PDF preview blank in
+    // Safari. Other sites still can't frame Instante.
+    "frame-ancestors 'self'",
     "base-uri 'none'",
     "form-action 'self'",
   ].join('; ');

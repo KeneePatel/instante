@@ -386,7 +386,7 @@
   - **Depends on:** T12, T16, T17a. **Files:** `apps/web/app/(shell)/ping/page.tsx`, `apps/web/app/(shell)/ping/pdf-preview.tsx`, `scripts/dev.sh`, plus an edit to `package.json`. **Size:** S.
   - **Notes from T17a:** `next dev` listens on every interface unless started with `-H 127.0.0.1`, so `scripts/dev.sh` passes it. The ping page sits at `/ping`, which no navigation entry marks; platform criterion 16's "the ping page loads at `http://instante.localhost:4310`" means that page there.
 
-- [ ] **T17c: Fonts from the checkout**
+- [x] **T17c: Fonts from the checkout**
   - **Does:** `app/fonts.ts` uses `next/font/local` with Geist's and Geist Mono's variable woff2 files and their SIL Open Font License, taken from a tagged release of the font's own repository (`vercel/geist-font`) and committed under `apps/web/app/fonts/`, so no build fetches them from Google (the owner's choice, 2026-11-18): today every `next build`, CI and each release on the Mac, downloads them unpinned, and an offline release can't build.
   - **Acceptance:** a build with the network refused succeeds; pages look as before (Geist, computed in the browser), beyond Latin too (a `ł`, a `Ж` and an `ạ` render in Geist, as they do now: Next's own copies of Geist, in `next/dist/next-devtools`, are Latin subsets with no licence, so they don't qualify); no `fonts.googleapis.com` or `fonts.gstatic.com` request in a build. A variable file needs no `weight`.
   - **Verify:** `pnpm --filter @instante/web build` with a dead proxy; the computed font in the browser.

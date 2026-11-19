@@ -260,10 +260,17 @@ describe('the backend', () => {
       expect(text.slice(startxref).startsWith('xref\n')).toBe(true);
       // The trailer's root is the catalog, whose pages hold the one page.
       const object = (n: number) => text.slice(offsets[n - 1]).split('endobj')[0] ?? '';
-      expect(text).toMatch(/trailer\n<< \/Size 4 \/Root 1 0 R >>/);
+      expect(offsets).toHaveLength(5);
+      expect(text).toMatch(/trailer\n<< \/Size 6 \/Root 1 0 R >>/);
       expect(object(1)).toMatch(/\/Type \/Catalog \/Pages 2 0 R/);
       expect(object(2)).toMatch(/\/Type \/Pages \/Kids \[3 0 R\] \/Count 1/);
       expect(object(3)).toMatch(/\/Type \/Page \/Parent 2 0 R .*\/Resources/);
+      expect(object(3)).toMatch(/\/Font << \/F1 5 0 R >>.*\/Contents 4 0 R/);
+      // The page draws something, so a viewer that shows it can be told from one that doesn't.
+      const stream = /<< \/Length (\d+) >>\nstream\n([^]*)\nendstream/.exec(object(4));
+      expect(stream?.[2]).toContain('(Instante) Tj');
+      expect(Number(stream?.[1])).toBe(stream?.[2]?.length);
+      expect(object(5)).toMatch(/\/Type \/Font \/Subtype \/Type1 \/BaseFont \/Helvetica/);
     });
   });
 

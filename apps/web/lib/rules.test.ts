@@ -113,7 +113,7 @@ describe('contentSecurityPolicy', () => {
         "connect-src 'self'",
         'frame-src blob:',
         "object-src 'none'",
-        "frame-ancestors 'none'",
+        "frame-ancestors 'self'",
         "base-uri 'none'",
         "form-action 'self'",
       ].join('; '),

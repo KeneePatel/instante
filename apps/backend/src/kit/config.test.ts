@@ -80,7 +80,7 @@ describe('loadConfig', () => {
     expect(loadConfig(devEnv, runtime(devFiles))).toEqual({
       env: 'development',
       role: 'all',
-      testRoutes: false,
+      testRoutes: true,
       listen: { address: '127.0.0.1', port: 8080 },
       allowedHost: 'localhost:3000',
       databaseUrl: 'postgresql://instante_app@localhost:5432/instante_dev',
@@ -93,9 +93,10 @@ describe('loadConfig', () => {
     expect(loadConfig(env, runtime(devFiles)).role).toBe('all');
   });
 
-  it('registers the test routes only with INSTANTE_ENV=test', () => {
+  it('registers the test routes in development and test runs, never in production', () => {
     const env = { ...devEnv, INSTANTE_ENV: 'test', PORT: '4321', ALLOWED_HOST: 'localhost:4320' };
     expect(loadConfig(env, runtime(devFiles)).testRoutes).toBe(true);
+    expect(loadConfig(devEnv, runtime(devFiles)).testRoutes).toBe(true);
     expect(loadConfig(prodEnv, runtime(prodFiles)).testRoutes).toBe(false);
   });
 
@@ -254,7 +255,7 @@ describe('loadConfig', () => {
       expect(loadConfig(env, runtime())).toEqual({
         env: 'development',
         role: 'documents',
-        testRoutes: false,
+        testRoutes: true,
         documentsSocket: '/tmp/instante-dev/documents.sock',
       });
       for (const name of [
@@ -296,7 +297,7 @@ describe('loadConfig', () => {
       ).toEqual({
         env: 'development',
         role: 'cli',
-        testRoutes: false,
+        testRoutes: true,
         databaseUrl: undefined,
         ownerDatabaseUrl: 'postgresql://o@localhost/x',
       });

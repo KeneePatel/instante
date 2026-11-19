@@ -27,7 +27,8 @@ export type Role = (typeof ROLES)[number];
 
 type Common = {
   env: Env;
-  /** The test-only route table is registered only with INSTANTE_ENV=test. */
+  /** The test-only route table is registered in development and test runs, never in
+   * production (the owner's choice, 2026-11-18: the ping page's sample PDF under `pnpm dev`). */
   testRoutes: boolean;
 };
 export type BackendConfig = Common & {
@@ -240,7 +241,7 @@ export function loadConfig(
 
   if (problems.length > 0) throw new ConfigError(problems);
 
-  const common = { env: v.INSTANTE_ENV, testRoutes: v.INSTANTE_ENV === 'test' };
+  const common = { env: v.INSTANTE_ENV, testRoutes: v.INSTANTE_ENV !== 'production' };
   switch (v.ROLE) {
     case 'all':
       return {
