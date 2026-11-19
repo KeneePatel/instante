@@ -17,7 +17,7 @@ import { registerRoutes, type AppEnv, type Authenticate, type Deps } from './reg
 export type AppOptions = {
   port: number;
   allowedHost: string;
-  /** The test-only table, registered only with INSTANTE_ENV=test. */
+  /** The test-only table, registered in development and test runs, never in production. */
   testRoutes: boolean;
   authenticate: Authenticate;
   /** The checks /readyz reports as failing, or none. */

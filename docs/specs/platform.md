@@ -123,7 +123,7 @@ That keeps "patched the day it lands" possible without loosening the setting.
 - **The id generator:** a prefix and 8 lowercase Crockford base32 characters ([ADR-008](../decisions/ADR-008-master-resume-document.md)).
 - **Routes in `platform`:**
   - `GET /api/ping` (`public`);
-  - a separate `testRoutes` table, registered only when `INSTANTE_ENV=test`:
+  - a separate `testRoutes` table, registered in development and test runs, never in production (the owner's choice in T17b, 2026-11-18, so the ping page's sample PDF shows under `pnpm dev`):
     - `GET /api/test/user-only` (`user`), for the unauthenticated matrix;
     - `POST /api/test/echo`, which reports a SHA-256 of `Authorization`, whether a `Cookie` arrived before it was dropped, and the body's size, under a 5 MB limit;
     - `GET /api/test/slow?seconds=35`, which sends nothing at all, not even headers, for that long;
@@ -242,7 +242,7 @@ Every Instante process, the web server included, starts with `--disable-sigusr1`
      - `img-src 'self' data: blob:`;
      - `connect-src 'self'`, plus the Supabase address that `accounts` adds;
      - `frame-src blob:`;
-     - `object-src 'none'`, `frame-ancestors 'none'`, `base-uri 'none'`, `form-action 'self'`.
+     - `object-src 'none'`, `frame-ancestors 'self'`, `base-uri 'none'`, `form-action 'self'`. `'self'`, not `'none'` (the owner's choice in T17b, 2026-11-18): WebKit applies the page's `frame-ancestors` to a `blob:` document the page frames, so `'none'` left a PDF preview blank in Safari; other sites still can't frame Instante.
 
      In development the policy also allows what `next dev` needs, keyed on `NODE_ENV`: `'unsafe-eval'`, which Next's CSP guide lists, and `style-src 'self' 'unsafe-inline'` with no nonce, since Next 16.4's own dev tools insert styles without one (the owner's choice, 2026-11-16). A test checks that production's policy has neither. `accounts` adds the session logic after this step.
 
