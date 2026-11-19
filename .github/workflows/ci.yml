@@ -2,6 +2,10 @@ name: ci
 
 on:
   push:
+    # Dependabot's branches are checked by their pull request's run; a run of their push as well
+    # would only double it.
+    branches-ignore:
+      - 'dependabot/**'
   pull_request:
 
 # Least privilege: CI reads the repository and holds no secrets.
@@ -137,12 +141,11 @@ jobs:
       - name: Install gitleaks, checksum checked
         run: |
           set -euo pipefail
-          cd "$RUNNER_TEMP"
-          curl -fsSL -o gitleaks.tar.gz \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum --check --strict
-          mkdir -p bin
-          tar -xzf gitleaks.tar.gz -C bin gitleaks
+          bash scripts/ci/fetch-checked.sh \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            "$GITLEAKS_SHA256" "$RUNNER_TEMP/gitleaks.tar.gz"
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP/bin" gitleaks
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       # Scans the commits this push or pull request adds, as gitleaks' own action does.
       # The first commits were scanned before they were pushed; one of them holds a
@@ -152,12 +155,72 @@ jobs:
           BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          zero=0000000000000000000000000000000000000000
-          if [ "$GITHUB_REF" = "refs/heads/main" ] && [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "$zero" ] \
-             && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-            range="${BEFORE}..HEAD"
-          else
-            range="$(git merge-base origin/main HEAD)..HEAD"
-          fi
-          echo "Scanning $range"
-          gitleaks git --redact --no-banner --log-opts="$range" .
+          base="$(bash scripts/ci/scan-base.sh)"
+          echo "Scanning ${base}..HEAD"
+          gitleaks git --redact --no-banner --log-opts="${base}..HEAD" .
+
+  # ShellCheck at the Mac's version: the runner's own is apt's 0.9.0, which misses checks
+  # 0.10 and 0.11 added.
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SHELLCHECK_VERSION: 0.11.0
+      # GitHub's SHA-256 of the release's shellcheck-v0.11.0.linux.x86_64.tar.xz: the release
+      # publishes no checksum file of its own.
+      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install ShellCheck, checksum checked
+        run: |
+          set -euo pipefail
+          bash scripts/ci/fetch-checked.sh \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+            "$SHELLCHECK_SHA256" "$RUNNER_TEMP/shellcheck.tar.xz"
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP/bin" --strip-components=1 \
+            "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          "$RUNNER_TEMP/bin/shellcheck" --version | grep -qx "version: ${SHELLCHECK_VERSION}"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Every shell script in scripts/
+        run: bash scripts/ci/shellcheck.sh
+
+  # The dependency bar (CONSTRAINTS.md): nothing at high or above, judged by scripts/check-osv.ts.
+  # osv-weekly.yml runs the same scan every week, for advisories published since.
+  osv-scanner:
+    name: osv-scanner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Node, for the gate; it imports nothing but Node's own modules, so nothing is installed.
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - name: Install osv-scanner, checksum checked
+        run: bash scripts/ci/install-osv-scanner.sh
+      - name: Nothing at high or above
+        run: bash scripts/ci/osv-scan.sh "$RUNNER_TEMP/osv.json"
+
+  # The code bar (CONSTRAINTS.md): no new ERROR findings from Semgrep's registry rules.
+  semgrep:
+    name: semgrep
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # 1.183.0, pushed 2026-10-29: the multi-arch image, pinned by digest, which fixes Semgrep
+      # and its Python packages together.
+      SEMGREP_IMAGE: semgrep/semgrep:1.183.0@sha256:2e45517a85e13a9cca14a2a00df6bb48affd66b8ebfae1b0991cd57578362fb0
+    steps:
+      # The whole history, so Semgrep can scan the base commit for what was there already.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: New ERROR findings since the base, no metrics
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: bash scripts/ci/semgrep.sh

@@ -377,7 +377,7 @@
     - **a test:** a 64-character digest, the boundary only one side of which was pinned;
     - **refuted:** a title for the not-found screen inside the shell (the page's own metadata wins, by Next's design); focus rings under 3:1 (shadcn's own, which CLAUDE.md doesn't cover); T17c's choice of files (it's T17c's work, now spelt out); the generated components missing from Files (the task list's rule leaves generated files out).
 
-- [ ] **T17b: The ping page and `pnpm dev`**
+- [x] **T17b: The ping page and `pnpm dev`**
   - **Does:**
     - the ping page, calling the API from a Server Component and a Client Component, and a PDF shown through a `Blob`;
     - the root `pnpm dev`: web on `127.0.0.1:3000` (`ALLOWED_HOST=localhost:3000`), the backend on `127.0.0.1:8080`, and the document service on a socket in its own `0700` folder under `$TMPDIR`.

@@ -1,0 +1,36 @@
+name: osv-weekly
+
+# The dependency bar again each week (CONSTRAINTS.md, "Dependencies": CI and weekly), for
+# advisories published since main last changed. It runs on main's newest commit, and a failed
+# run emails whoever last changed this file's schedule.
+#
+# It's a workflow of its own: in ci.yml a schedule would share the `ci-refs/heads/main`
+# concurrency group with main's push runs, and cancel them or be cancelled by them, leaving
+# cancelled check runs on the commits `release` reads.
+on:
+  schedule:
+    # Mondays at 07:23 UTC: off the hour, when GitHub delays or drops fewer scheduled runs.
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: osv-weekly
+  cancel-in-progress: false
+
+jobs:
+  osv-scanner-weekly:
+    name: osv-scanner-weekly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - name: Install osv-scanner, checksum checked
+        run: bash scripts/ci/install-osv-scanner.sh
+      - name: Nothing at high or above
+        run: bash scripts/ci/osv-scan.sh "$RUNNER_TEMP/osv.json"
