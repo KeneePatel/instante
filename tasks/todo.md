@@ -351,7 +351,7 @@
     - **docs:** the accounts spec named the helper `apiFetch`; it's `createApi`'s token provider. A token provider can't retry a call, so the 401 refresh-and-retry is A7's wrapper around the browser's `Api` (A7's entry and `docs/architecture.md` now say so, and A7 lists `lib/api.ts`); the input types are the schemas' output types, as the As built now says;
     - **refuted:** that the token interface can't support the retry (the provider is asked on every call, so a wrapper can refresh and call again), and that replies failing before their body is read hold their connection open (with a real server, 200 such calls used 2 connections).
 
-- [ ] **T17a: The shell**
+- [x] **T17a: The shell**
   - **Does:** the shell's layout and navigation, with empty Inbox, Resumes, Applied and Settings pages, and the error, not-found and global-error pages, with no inline `<style>`: Next's built-in ones put one on the page without the nonce, which production's policy blocks (found in T15's review).
   - **Acceptance:** each page renders in development with the nonce and no CSP violation; a 404 and a thrown error log no CSP violation in a production build; axe checks them in T19.
   - **Verify:** `pnpm dev`, then each page at `http://localhost:3000`.
@@ -391,6 +391,10 @@
   - **Acceptance:** a build with the network refused succeeds; pages look as before (Geist, computed in the browser), beyond Latin too (a `ł`, a `Ж` and an `ạ` render in Geist, as they do now: Next's own copies of Geist, in `next/dist/next-devtools`, are Latin subsets with no licence, so they don't qualify); no `fonts.googleapis.com` or `fonts.gstatic.com` request in a build. A variable file needs no `weight`.
   - **Verify:** `pnpm --filter @instante/web build` with a dead proxy; the computed font in the browser.
   - **Depends on:** T17a. **Files:** `apps/web/app/fonts.ts`, `apps/web/app/fonts/*`. **Size:** XS.
+  - **As built:**
+    - the owner approved the download (2026-11-18): `fonts/Geist/webfonts/Geist[wght].woff2` (69,760 bytes), `fonts/GeistMono/webfonts/GeistMono[wght].woff2` (71,596 bytes) and `OFL.txt` (4,384 bytes) from `vercel/geist-font` at tag `v1.9.2` (published 2026-11-06), fetched into an empty folder, and each matching its git blob at that tag (`71dab8b…`, `0e746fc…`, `999fa23…`). They're committed as `apps/web/app/fonts/{Geist-Variable,GeistMono-Variable}.woff2`, the names Geist's own npm package gives these files, which keeps brackets out of a path under `app/`, and `OFL.txt`, whose copyright line reserves no font name;
+    - `app/fonts.ts` loads them with `next/font/local`, keeping the variables `--font-geist-sans` and `--font-geist-mono`, with `weight: '100 900'` written out so each face declares the whole range, as next/font/google's did (Chrome draws the range without it; Safari wasn't measured). `next/font/local` names the families after their variables (`geistSans`), where Google's were `Geist`: the file drawn is the same;
+    - checked: `next build` inside a macOS sandbox that denies every outbound connection but loopback succeeds, and `check-no-static` passes (the same sandbox refuses `curl https://fonts.googleapis.com`, which succeeds outside it). In headless Chrome on the built server, Chrome draws Latin, Latin Extended (`łŁőŐ`), Cyrillic (`ЖжЯя`) and Vietnamese (`ạẠươ`) samples with the committed Geist, and the same with Geist Mono, through `--font-geist-mono`; the only font requests are the two files, from the app itself, and there's no CSP violation.
 
 - [ ] **T18: CI's scanners and the production build**
   - **Does:** in `ci.yml`:
