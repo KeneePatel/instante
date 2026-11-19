@@ -33,6 +33,24 @@ Instante is built in the phases set out in [`docs/sdlc.md`](docs/sdlc.md). The c
 - Merge only by fast-forward from the command line after CI passes on the branch (`git push origin <branch>:main`). Never use GitHub's merge, squash or rebase buttons: they change the committer.
 - Since 2026-11-13 the owner allows everyday git work on this repository without asking each time: commits, branches, pushes, and fast-forward merges to `main` after CI passes. Still ask first before a force push, deleting a remote branch, rewriting history that's already pushed, or changing GitHub settings (the ruleset on `main` included).
 
+### Dependency updates
+
+Dependabot (`.github/dependabot.yml`) only proposes updates. Its commits are `dependabot[bot]`'s, with a `Signed-off-by` trailer, so `check-commits` and the `guards` job refuse them by design, and they never reach `main`. An agent takes an update over, and the owner says yes before it merges (the owner's choice, 2026-11-19):
+
+```bash
+git fetch origin <dependabot's branch>
+git switch -c deps-<name> origin/main
+git cherry-pick --no-commit FETCH_HEAD
+pnpm install --frozen-lockfile
+git commit -m "Update <package> from <old> to <new>"
+git push origin deps-<name>
+```
+
+- Cherry-pick it rather than copying files: a `pnpm-lock.yaml` copied from Dependabot's branch can undo what reached `main` after it branched.
+- Write a new message: amending Dependabot's commit keeps its trailer.
+- Open a pull request for the branch. Once CI passes, ask the owner, and fast-forward `main` only on their yes; this is the one merge the everyday approval above doesn't cover. Then close Dependabot's pull request with a comment naming the commit.
+- A security update can bring a version younger than 7 days, which CI's frozen install refuses until the owner approves an exception row and a pinned `minimumReleaseAgeExclude` entry ([`docs/specs/platform.md`](docs/specs/platform.md), "Security releases younger than 7 days").
+
 ## 4. Before writing code
 
 - Read the parts of `docs/product.md` (what the app does), `docs/architecture.md` (how it's built), `docs/decisions/` and the module's spec in `docs/specs/` that apply to the task, and `CONSTRAINTS.md`.

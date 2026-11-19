@@ -41,10 +41,12 @@ const log = git([
 if (log === null) bail(`could not read the commits since ${mergeBase}`);
 
 const problems: string[] = [];
+let fromDependabot = false;
 for (const record of log.split(RECORD)) {
   const [hash, author, committer, trailers, message] = record.replace(/^\n/, '').split(FIELD);
   if (hash === undefined || hash === '') continue;
   if (author !== OWNER) problems.push(`${hash}: author is ${author ?? '(none)'}`);
+  if (author?.startsWith('dependabot[bot] <') === true) fromDependabot = true;
   if (committer !== OWNER) problems.push(`${hash}: committer is ${committer ?? '(none)'}`);
   if ((trailers ?? '').trim() !== '') problems.push(`${hash}: has trailers`);
   if (ATTRIBUTION.test(message ?? '')) problems.push(`${hash}: mentions AI attribution`);
@@ -57,4 +59,11 @@ if (problems.length === 0) {
 console.error(`check-commits: ${String(problems.length)} problem(s):`);
 for (const p of problems) console.error(`  ${p}`);
 console.error(`\nEvery commit is authored and committed as ${OWNER}, with no trailers.`);
+// Dependabot only proposes (AGENTS.md, "Dependency updates"): its commits fail here by design.
+if (fromDependabot) {
+  console.error(
+    'A Dependabot update is taken over, not merged: cherry-pick it onto a branch of your own and' +
+      ' commit it with a new message, as AGENTS.md says under "Dependency updates".',
+  );
+}
 process.exit(1);

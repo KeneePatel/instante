@@ -1,0 +1,41 @@
+# Dependabot proposes updates; it never merges them. Its commits are dependabot[bot]'s, with a
+# Signed-off-by trailer, which check-commits refuses, so an agent re-commits each update as the
+# owner, CI runs, and the owner says yes before the fast-forward (AGENTS.md, "Dependency
+# updates", the owner's choice of 2026-11-19).
+version: 2
+updates:
+  - package-ecosystem: npm
+    # pnpm 12; the root's lockfile covers apps/* and packages/*.
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+    # pnpm's minimumReleaseAge (10080 minutes), which CI's frozen install enforces anyway.
+    cooldown:
+      default-days: 7
+    # Exact pins stay exact (scripts/test/workspace-rules.test.ts).
+    versioning-strategy: increase
+    open-pull-requests-limit: 5
+    groups:
+      # One pull request for the minor and patch updates, so one takeover. Majors come alone.
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+        patterns: ['*']
+        # Upgraded one at a time: pg-boss's upgrades are releases of their own, and Hono,
+        # Drizzle and TypeScript are mid-transition (ADR-002).
+        exclude-patterns: [pg-boss, hono, '@hono/*', 'drizzle-*', typescript, 'typescript-*']
+    ignore:
+      # @types/node follows the Node major that mise.toml pins.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+  - package-ecosystem: github-actions
+    # The workflows' actions, pinned by commit SHA with their version beside them.
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5

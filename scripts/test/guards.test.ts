@@ -454,6 +454,25 @@ describe('check-commits', () => {
     expect(output).toContain('committer is Someone Else');
   });
 
+  it('refuses a Dependabot commit, pointing at the takeover, and says nothing of it otherwise', () => {
+    const repo = makeRepo();
+    repo.write('a.txt', 'a');
+    repo.commit(
+      'Bump next from 16.4.5 to 16.4.6\n\nSigned-off-by: dependabot[bot] <bot@example.test>',
+      { name: 'dependabot[bot]', email: 'bot@example.test' },
+      { name: 'GitHub', email: 'committer@example.test' },
+    );
+    const { status, output } = repo.run(check);
+    expect(status).toBe(1);
+    expect(output).toContain('author is dependabot[bot]');
+    expect(output).toContain('has trailers');
+    expect(output).toContain('as AGENTS.md says under "Dependency updates"');
+    const other = makeRepo();
+    other.write('a.txt', 'a');
+    other.commit('Add a', stranger);
+    expect(other.run(check).output).not.toContain('Dependency updates');
+  });
+
   it('flags a trailer and AI attribution', () => {
     const repo = makeRepo();
     repo.write('a.txt', 'a');
