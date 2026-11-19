@@ -24,6 +24,9 @@ set -u -o pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
 cd "$root" || exit 2
+# start, run_for and ended_as: each process in a group of its own, stopped whole.
+# shellcheck source=scripts/prod-build/procs.sh
+. scripts/prod-build/procs.sh || exit 2
 
 web_port=4320
 backend_port=4321
@@ -92,76 +95,15 @@ if [ "${#db_socket}" -gt 103 ]; then
   die "$db_socket is too long for a socket: set a shorter TMPDIR"
 fi
 
-groups="$work/groups"
-stopping=0
-# Stops each process group started below: TERM, then KILL to any left after 15 seconds.
-end_groups() {
-  local group name tries=75 left
-  [ -f "$groups" ] || return 0
-  while read -r group name; do
-    kill -TERM -- "-$group" 2>/dev/null
-  done <"$groups"
-  while [ "$tries" -gt 0 ]; do
-    left=0
-    while read -r group name; do
-      kill -0 -- "-$group" 2>/dev/null && left=1
-    done <"$groups"
-    [ "$left" = 0 ] && return 0
-    sleep 0.2
-    tries=$((tries - 1))
-  done
-  while read -r group name; do
-    if kill -0 -- "-$group" 2>/dev/null; then
-      echo "prod-build-check: $name didn't stop in 15 seconds; killing it" >&2
-      kill -KILL -- "-$group" 2>/dev/null
-    fi
-  done <"$groups"
-}
-cleanup() {
-  [ "$stopping" = 1 ] && return 0
-  stopping=1
-  trap '' INT TERM HUP
-  end_groups
-  rm -rf "$work"
-}
-trap 'cleanup' EXIT
-trap 'cleanup; exit 130' INT
-trap 'cleanup; exit 143' TERM
-trap 'cleanup; exit 129' HUP
-
-(umask 077 && mkdir -p "$work/tools" "$work/logs" "$home/run" "$home/secrets") || exit 2
+# From here every exit stops what the check started and removes the folder (procs.sh).
+procs_setup "$work" || die "can't set up $work"
+(umask 077 && mkdir -p "$work/tools" "$home/run" "$home/secrets") || exit 2
 (umask 077 && printf 'postgresql://instante_app@/instante_test?host=%s\n' "$home/run" \
   >"$home/secrets/app.url") || exit 2
 
-# Starts the command after the name in a process group of its own, its output in
-# logs/<name>.log; its pid is then in $last_pid.
-last_pid=''
-start() {
-  local name="$1"
-  shift
-  set -m
-  "$@" </dev/null >"$work/logs/$name.log" 2>&1 &
-  last_pid=$!
-  set +m
-  echo "$last_pid $name" >>"$groups"
-}
-
-# Runs the command to its end, or kills it after $1 seconds and returns 124: bash 3.2 has no
-# `timeout`.
-run_for() {
-  local deadline=$((SECONDS + $1)) pid
-  shift
-  "$@" &
-  pid=$!
-  while kill -0 "$pid" 2>/dev/null; do
-    if [ "$SECONDS" -ge "$deadline" ]; then
-      kill -KILL "$pid" 2>/dev/null
-      wait "$pid" 2>/dev/null
-      return 124
-    fi
-    sleep 0.2
-  done
-  wait "$pid"
+# The end of a started process's log, for a failure's message: cleanup removes logs/.
+said() {
+  printf '\n%s' "$(tail -n 20 "$work/logs/$1.log" 2>/dev/null)"
 }
 
 # Waits up to $2 seconds for the command after them to succeed, while process $1 runs.
@@ -219,7 +161,8 @@ fi
 # 3. The guard. Each case is one change from the settings the stack starts with in step 5, and
 # must exit 78 naming that problem alone: a schema problem stops the guard before its production
 # checks, so a looser match could pass for the wrong reason. A case the guard wrongly accepted
-# would start, and be killed at its 20-second deadline.
+# would start, and be stopped, with whatever it started, at its 20-second deadline. Each case's
+# output goes to a file, not $(...), which would wait for every process holding it open.
 backend_env=(INSTANTE_ENV=production ROLE=all INSTANTE_HOME="$home" LISTEN_ADDRESS=127.0.0.1
   PORT="$backend_port" ALLOWED_HOST="$allowed_host" DATABASE_URL_FILE="$home/secrets/app.url"
   DOCUMENTS_SOCKET="$socket")
@@ -230,12 +173,13 @@ main="$root/apps/backend/src/main.ts"
 refuses() {
   local expected="$1" out status
   shift
-  out="$(run_for 20 "$@" 2>&1 >/dev/null)"
+  run_for 20 "$@" >/dev/null 2>"$work/logs/case.log"
   status=$?
+  out="$(cat "$work/logs/case.log")"
   if [ "$status" = 78 ] && [ "$(printf '%s\n' "$out" | sed -n 's/^- //p')" = "$expected" ]; then
     pass "refused: $expected"
   else
-    fail "expected exit 78 and only \"$expected\", got $status: $out"
+    fail "expected exit 78 and only \"$expected\", got $(ended_as "$status"): $out"
   fi
 }
 url_file() {
@@ -293,13 +237,14 @@ web() {
 mismatch() {
   local now="$1" out status
   shift
-  out="$(run_for 60 web "$@" 2>&1)"
+  run_for 60 web "$@" >"$work/logs/case.log" 2>&1
   status=$?
+  out="$(cat "$work/logs/case.log")"
   if [ "$status" = 1 ] && printf '%s\n' "$out" | grep -qxF \
     "This build sends /api to $backend_url, but BACKEND_INTERNAL_URL is $now: build again with it, or set it back."; then
     pass "built for $backend_url, the web app stops with BACKEND_INTERNAL_URL $now ($*)"
   else
-    fail "the web app with BACKEND_INTERNAL_URL $now ($*): exit $status: $out"
+    fail "the web app with BACKEND_INTERNAL_URL $now ($*): $(ended_as "$status"): $out"
   fi
 }
 mismatch "$other_url" BACKEND_INTERNAL_URL="$other_url"
@@ -314,14 +259,14 @@ await "$last_pid" 10 test -S "$db_socket" || die "the database relay didn't star
 start documents env -i "${documents_env[@]}" "$node" --disable-sigusr1 "$main"
 documents_pid=$last_pid
 await "$documents_pid" 30 curl -s -o /dev/null --max-time 2 --unix-socket "$socket" http://documents/ ||
-  fail "the document service didn't start"
+  fail "the document service didn't start:$(said documents)"
 
 start backend env -i "${backend_env[@]}" "$node" --disable-sigusr1 "$main"
 backend_pid=$last_pid
 if await "$backend_pid" 60 curl -fs -o /dev/null --max-time 6 "$backend_url/readyz"; then
   pass "the backend starts in production, and /readyz answers"
 else
-  fail "/readyz: $(curl -s --max-time 6 "$backend_url/readyz")"
+  fail "/readyz: $(curl -s --max-time 6 "$backend_url/readyz")$(said backend)"
 fi
 
 start web web BACKEND_INTERNAL_URL="$backend_url"
@@ -331,7 +276,7 @@ web_ready() { [ "$(page -o /dev/null -w '%{http_code}' "http://127.0.0.1:$web_po
 if await "$web_pid" 60 web_ready; then
   pass "the web app starts with its own BACKEND_INTERNAL_URL"
 else
-  fail "the web app didn't start"
+  fail "the web app didn't start:$(said web)"
 fi
 if page -D - -o /dev/null "http://127.0.0.1:$web_port/api/ping" | tr -d '\r' |
   grep -qix 'cache-control: private, no-store'; then
