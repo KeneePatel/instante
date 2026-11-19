@@ -12,7 +12,10 @@ export default function NotFound() {
   return (
     <Screen title="Page not found">
       <p className="max-w-prose text-muted-foreground">There’s nothing at this address.</p>
-      <Link href="/" className={buttonVariants({ className: 'self-start max-md:h-11' })}>
+      <Link
+        href="/"
+        className={buttonVariants({ className: 'self-start max-md:h-11 pointer-coarse:h-11' })}
+      >
         Go to Inbox
       </Link>
     </Screen>

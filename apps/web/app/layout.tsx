@@ -4,8 +4,7 @@ import { fontVariables } from './fonts';
 import './globals.css';
 
 export const metadata: Metadata = {
-  // Each page names itself, so a client navigation changes the title, which is what Next's
-  // route announcer reads out.
+  // Each page names itself, for the tab and the history.
   title: { default: 'Instante', template: '%s · Instante' },
   description: 'A personal job search: postings that fit you, and a resume for the ones you pick.',
 };

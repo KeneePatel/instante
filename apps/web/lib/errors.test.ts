@@ -9,6 +9,10 @@ describe('digestOf', () => {
     expect(
       digestOf(Object.assign(new Error('Minified React error #441'), { digest: '3440023046' })),
     ).toBe('3440023046');
+    // Up to 64 characters.
+    expect(digestOf(Object.assign(new Error('x'), { digest: 'x'.repeat(64) }))).toBe(
+      'x'.repeat(64),
+    );
   });
 
   it('is nothing for an error without one, or with one that isn’t short text', () => {
