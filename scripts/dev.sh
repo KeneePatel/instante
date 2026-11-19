@@ -8,8 +8,9 @@
 #     backend's /readyz answers.
 # Each starts from an empty environment plus its own names, as the launcher starts them, so
 # nothing from your shell (keys, tokens) reaches them. Ctrl-C, TERM, HUP, or any one of the
-# three stopping, stops the others and removes the folder. Each line of output starts with its
-# process's name. Run scripts/dev-db.sh once first.
+# three stopping, stops the others and removes the folder; if this script is killed outright, a
+# watchdog does. Each line of output starts with its process's name. Run scripts/dev-db.sh once
+# first.
 #
 # DEV_WEB_PORT and DEV_BACKEND_PORT move it off 3000 and 8080 (its own tests use them); the
 # ports real use and the end-to-end tests own are refused. Written for macOS's bash 3.2: no
@@ -34,8 +35,9 @@ fi
 web_port="${DEV_WEB_PORT:-3000}"
 backend_port="${DEV_BACKEND_PORT:-8080}"
 for port in "$web_port" "$backend_port"; do
+  # Six digits or more is out of range, and too long for bash 3.2's test to compare.
   case "$port" in
-    '' | *[!0-9]* | 0*)
+    '' | *[!0-9]* | 0* | ??????*)
       echo "dev: a port must be a number from 1 to 65535, not '$port'" >&2
       exit 2
       ;;
@@ -72,11 +74,25 @@ if [ -z "$pinned" ] || [ "$version" != "v$pinned" ]; then
 fi
 node_dir="$(dirname "$node")"
 
+# lsof by its path, as the launcher's guards find it: a PATH without /usr/sbin would make every
+# port below look free.
+lsof=''
+for candidate in /usr/sbin/lsof /usr/bin/lsof; do
+  if [ -x "$candidate" ]; then
+    lsof="$candidate"
+    break
+  fi
+done
+if [ -z "$lsof" ]; then
+  echo "dev: lsof isn't at /usr/sbin/lsof or /usr/bin/lsof" >&2
+  exit 2
+fi
+
 # Nothing else may listen on either port, on any address: a server on ::1 or `localhost`
 # would answer http://localhost:3000 in Instante's place, and a stale one would answer the
 # readiness checks below.
 for port in "$web_port" "$backend_port"; do
-  holder="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | sed -n '2p')"
+  holder="$("$lsof" -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | sed -n '2p')"
   if [ -n "$holder" ]; then
     echo "dev: port $port is in use: $holder" >&2
     exit 2
@@ -87,59 +103,94 @@ tmp="${TMPDIR:-/tmp}"
 tmp="${tmp%/}"
 
 # Folders that runs killed before they could clean up left behind, with any job folders in
-# them: each holds only a socket nothing answers on any more.
+# them. A folder goes once the script that made it (its dev.pid) has ended and nothing answers
+# on its socket. One with no dev.pid yet is a run that is starting, unless it's a minute old.
 for old in "$tmp"/instante-dev.*; do
   [ -d "$old" ] && [ -O "$old" ] || continue
+  owner="$(cat "$old/dev.pid" 2>/dev/null)"
+  case "$owner" in
+    '') [ -n "$(find "$old" -maxdepth 0 -mmin -1)" ] && continue ;;
+    *[!0-9]*) ;;
+    *) kill -0 "$owner" 2>/dev/null && continue ;;
+  esac
   if ! curl -s -o /dev/null --max-time 2 --unix-socket "$old/documents.sock" http://documents/; then
     rm -rf "$old"
   fi
 done
 
 # The socket's folder. mktemp -d makes it 0700; the document service refuses anything wider.
+# It also holds dev.pid, and `groups`, the process group and name of each process started.
 run="$(mktemp -d "$tmp/instante-dev.XXXXXX")" || exit 1
+echo "$$" >"$run/dev.pid" || {
+  rm -rf "$run"
+  exit 1
+}
 socket="$run/documents.sock"
+groups="$run/groups"
 
 names=()
 pids=()
 stopping=0
 
-# Stops every process still running, at most once: TERM to each one's process group (next dev's
-# server and Turbopack's workers are in its group), up to 15 seconds (the backend's grace is
-# 10), then KILL.
+# Stops every process group in $groups: TERM to each (next dev's server and Turbopack's workers
+# are in its group), up to 15 seconds for all to go (the backend's grace is 10), then KILL to
+# any left, saying which.
+end_groups() {
+  local group name tries=75 left
+  [ -f "$groups" ] || return 0
+  while read -r group name; do
+    kill -TERM -- "-$group" 2>/dev/null
+  done <"$groups"
+  while [ "$tries" -gt 0 ]; do
+    left=0
+    while read -r group name; do
+      kill -0 -- "-$group" 2>/dev/null && left=1
+    done <"$groups"
+    [ "$left" = 0 ] && return 0
+    sleep 0.2
+    tries=$((tries - 1))
+  done
+  while read -r group name; do
+    if kill -0 -- "-$group" 2>/dev/null; then
+      echo "dev: $name didn't stop in 15 seconds; killing it" >&2
+      kill -KILL -- "-$group" 2>/dev/null
+    fi
+  done <"$groups"
+}
+
+# Stops them all, at most once, then removes the folder.
 stop() {
   [ "$stopping" = 1 ] && return 0
   stopping=1
-  # Another signal now would run its trap inside this one and exit before the folder goes; the
-  # KILL below bounds the wait instead. Every child is already running, so none inherits this.
+  # Another signal now would run its trap inside this one and exit before the folder goes;
+  # end_groups' KILL bounds the wait instead. Every child is already running, so none inherits
+  # this.
   trap '' INT TERM HUP
-  local i pid tries
-  if [ "${#pids[@]}" -gt 0 ]; then
-    for pid in "${pids[@]}"; do
-      kill -TERM -- "-$pid" 2>/dev/null
-    done
-    tries=75
-    while [ "$tries" -gt 0 ]; do
-      i=0
-      for pid in "${pids[@]}"; do
-        kill -0 -- "-$pid" 2>/dev/null && i=$((i + 1))
-      done
-      [ "$i" -eq 0 ] && break
-      sleep 0.2
-      tries=$((tries - 1))
-    done
-    for i in "${!pids[@]}"; do
-      if kill -0 -- "-${pids[$i]}" 2>/dev/null; then
-        echo "dev: ${names[$i]} didn't stop in 15 seconds; killing it" >&2
-        kill -KILL -- "-${pids[$i]}" 2>/dev/null
-      fi
-    done
-  fi
+  end_groups
   rm -rf "$run"
 }
 trap 'stop' EXIT
 trap 'stop; exit 130' INT
 trap 'stop; exit 143' TERM
 trap 'stop; exit 129' HUP
+
+# Waits for the script ($1) to end. If the folder is still there, the script was killed before
+# it could stop the others (kill -9, or pnpm's KILL to its process group), so this stops them and
+# removes the folder. It runs in a process group of its own, which that KILL misses, ignores
+# the signals that stop the script, and goes on if its output has gone.
+watchdog() {
+  trap '' INT TERM HUP PIPE
+  while kill -0 "$1" 2>/dev/null; do
+    sleep 1
+  done
+  [ -d "$run" ] || return 0
+  echo "dev: the script was killed before it stopped the others; stopping them" >&2
+  end_groups
+  rm -rf "$run"
+}
+set -m
+watchdog "$$" </dev/null &
+set +m
 
 # Copies its input to stdout, each line after the name in $1. It ignores Ctrl-C and TERM, and
 # ends when the process it reads from closes its output, so that process can still write while
@@ -164,17 +215,18 @@ start() {
   pids+=("$!")
   names+=("$name")
   set +m
+  echo "$! $name" >>"$groups"
 }
 
-# Waits up to $2 seconds for the command after them to succeed, while process $1 runs.
+# Waits up to $2 seconds by the clock for the command after them to succeed, while process $1
+# runs. A try under way when the time is up runs to its own --max-time.
 await() {
-  local pid="$1" tries=$(($2 * 5))
+  local pid="$1" deadline=$((SECONDS + $2))
   shift 2
-  while [ "$tries" -gt 0 ]; do
+  while [ "$SECONDS" -lt "$deadline" ]; do
     kill -0 "$pid" 2>/dev/null || return 1
     "$@" >/dev/null 2>&1 && return 0
     sleep 0.2
-    tries=$((tries - 1))
   done
   return 1
 }
@@ -215,20 +267,24 @@ await "${pids[1]}" 60 curl -fs -o /dev/null --max-time 6 "$backend_url/readyz" |
 
 # Next starts in apps/web, since it resolves next.config.ts's own imports from its working
 # folder. Its environment wins over apps/web/.env.local. PATH leads with the pinned Node, which
-# Turbopack's workers start by name.
+# Turbopack's workers start by name. --inspect-port names the web port, which next dev's server
+# holds, so nothing can open a debugger in it: next dev's /__nextjs_attach-nodejs-inspector
+# answers before proxy.ts checks the Host, so a page whose name rebinds to 127.0.0.1 could
+# otherwise open one and drive it (docs/threat-model.md).
 echo "dev: web on 127.0.0.1:$web_port"
 start web apps/web env -i PATH="$node_dir:/usr/bin:/bin" TMPDIR="$tmp" \
   NEXT_TELEMETRY_DISABLED=1 ALLOWED_HOST="$allowed_host" BACKEND_INTERNAL_URL="$backend_url" \
-  "$node" --disable-sigusr1 "$next_bin" dev -H 127.0.0.1 -p "$web_port"
+  "$node" --disable-sigusr1 --inspect-port="$web_port" "$next_bin" dev -H 127.0.0.1 \
+  -p "$web_port"
 await "${pids[2]}" 120 web_ready || ended web "${pids[2]}"
 
 # Every listener on the web port must be next dev's own.
-for pid in $(lsof -nP -t -iTCP:"$web_port" -sTCP:LISTEN 2>/dev/null); do
+while IFS= read -r pid; do
   if [ "$(ps -o pgid= -p "$pid" | tr -d ' ')" != "${pids[2]}" ]; then
     echo "dev: another process listens on port $web_port too: $(ps -o command= -p "$pid")" >&2
     exit 1
   fi
-done
+done < <("$lsof" -nP -t -iTCP:"$web_port" -sTCP:LISTEN 2>/dev/null)
 echo "dev: open http://$allowed_host"
 
 # bash 3.2 has no `wait -n`: poll each one.

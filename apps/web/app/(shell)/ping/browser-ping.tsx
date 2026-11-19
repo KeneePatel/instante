@@ -65,9 +65,5 @@ function Said({ label, outcome }: { label: string; outcome: Outcome<string> | un
       : 'value' in outcome
         ? outcome.value
         : outcome.problem;
-  return (
-    <p role="status">
-      {label}: {text}
-    </p>
-  );
+  return <p role="status">{`${label}: ${text}`}</p>;
 }

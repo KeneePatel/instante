@@ -43,8 +43,10 @@ function Part({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+// One string, so the server's HTML holds the line whole: React puts a `<!-- -->` between
+// adjacent text parts, and an end-to-end check greps the line (T22).
 async function ServerPing() {
-  return <p>Server Component: {await pingFromServer()}</p>;
+  return <p>{`Server Component: ${await pingFromServer()}`}</p>;
 }
 
 /** The backend's answer, or what went wrong; anything the page can't say goes to the error

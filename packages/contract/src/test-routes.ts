@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { defineRoute, fileResponse, rawBody } from './define-route.ts';
 
-// Registered only with INSTANTE_ENV=test, to prove the walking skeleton's checks
-// (docs/specs/platform.md). Production refuses to start with them.
+// Registered in development and test runs, never in production, to prove the walking
+// skeleton's checks (docs/specs/platform.md).
 
 export const EchoResponseSchema = z.object({
   /** A SHA-256 of the Authorization header as it arrived, or null without one. */
