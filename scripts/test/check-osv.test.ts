@@ -57,7 +57,9 @@ describe('check-osv', () => {
   it('passes a report with no advisory, counting the lockfile’s packages', () => {
     const result = run(report());
     expect(result.status).toBe(0);
-    expect(result.output).toContain('2 packages in pnpm-lock.yaml, 0 advisory group(s), 0 at high');
+    expect(result.output).toContain(
+      '2 package names in pnpm-lock.yaml, 0 advisory group(s), 0 at high',
+    );
   });
 
   it.each([

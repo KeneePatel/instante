@@ -4,7 +4,8 @@
 
 ## Floor (always enforced, from the first commit with code)
 
-- **No new suppression comments:** `@ts-ignore`, `@ts-nocheck`, `@ts-expect-error` without a reason, `eslint-disable` in any form, ESLint inline configuration comments, `istanbul ignore`, `c8 ignore` and `v8 ignore` in any form, `nosemgrep`, `gitleaks:allow`. ESLint runs with `linterOptions.noInlineConfig` and `reportUnusedDisableDirectives`.
+- **No new suppression comments:** `@ts-ignore`, `@ts-nocheck`, `@ts-expect-error` without a reason, `eslint-disable` in any form, ESLint inline configuration comments, `istanbul ignore`, `c8 ignore` and `v8 ignore` in any form, `nosemgrep`, `gitleaks:allow`, `shellcheck disable`. ESLint runs with `linterOptions.noInlineConfig` and `reportUnusedDisableDirectives`.
+- **No scanner told to look at less:** no new or changed `.shellcheckrc`, `.semgrepignore` or `osv-scanner.toml`; no flag in a workflow or `scripts/ci/` that skips files, rules or failures (`continue-on-error` among them); no workflow that stops running a scanner.
 - **No unfinished work:** stubs that throw "not implemented", empty `catch {}` blocks, `TODO` standing where the implementation should be.
 - **No skipped tests:** no skipped, `.only` or deleted tests without a reason in the commit message.
 - **No secrets and no real people's data:** no secrets in source. No real person's data in fixtures, tests, screenshots or docs: use the Jordan Rivera persona and anonymized postings.

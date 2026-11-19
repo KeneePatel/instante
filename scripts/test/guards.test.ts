@@ -14,6 +14,8 @@ const LATER = k('TO', 'DO');
 const SKIP = k('.sk', 'ip(');
 const ONLY = k('.on', 'ly(');
 const EMPTY_CATCH = k('catch ', '{}');
+const SC_DISABLE = k('shellcheck ', 'disable');
+const CONTINUE = k('continue-on-', 'error');
 
 const scripts = fileURLToPath(new URL('..', import.meta.url));
 const OWNER = { name: 'Kenee Patel', email: 'patelkenee2804@gmail.com' };
@@ -122,12 +124,60 @@ describe('floor-guard', () => {
       'vitest.config.ts',
       `  coverage: { exclude: ['apps/web/lib/x.ts'] },\n`,
     ],
+    ['silenced-checker', 'scripts/a.sh', `# ${SC_DISABLE}=SC2086\necho $1\n`],
+    ['scanner-weakened', '.github/workflows/ci.yml', `      - run: x\n        ${CONTINUE}: true\n`],
+    ['scanner-weakened', 'scripts/ci/semgrep.sh', `semgrep scan ${k('--exclude', '-rule')} r\n`],
+    ['scanner-weakened', 'scripts/ci/semgrep.sh', `semgrep scan ${k('--incl', 'ude')} src\n`],
+    [
+      'scanner-weakened',
+      'scripts/ci/osv-scan.sh',
+      `osv-scanner scan ${k('--con', 'fig')} a.toml .\n`,
+    ],
+    [
+      'scanner-weakened',
+      'scripts/ci/osv-scan.sh',
+      `osv-scanner scan ${k('-', 'L')} pnpm-lock.yaml\n`,
+    ],
+    ['scanner-weakened', 'scripts/ci/osv-scan.sh', `osv-scanner ${k('--off', 'line')} .\n`],
+    ['scanner-weakened', 'scripts/ci/shellcheck.sh', `shellcheck ${k('-', 'e')} SC2086 -- a.sh\n`],
+    ['scanner-weakened', '.semgrepignore', 'apps/\n'],
+    ['scanner-weakened', 'osv-scanner.toml', '[[IgnoredVulns]]\nid = "GHSA-x"\n'],
+    ['scanner-weakened', 'scripts/.shellcheckrc', 'disable=SC2086\n'],
   ])('flags %s in %s', (rule, path, text) => {
     const repo = makeRepo();
     repo.write(path, text);
     const result = repo.run(guard);
     expect(result.status).toBe(1);
     expect(result.output).toContain(`[${rule}]`);
+  });
+
+  it('flags an empty scanner ignore file, which replaces the scanner’s own defaults', () => {
+    const repo = makeRepo();
+    repo.write('.semgrepignore', '');
+    const result = repo.run(guard);
+    expect(result.status).toBe(1);
+    expect(result.output).toContain('[scanner-weakened] .semgrepignore');
+  });
+
+  it('flags a workflow that stops running a scanner, but not one moved to another workflow', () => {
+    const run = (script: string) => `      - run: bash scripts/ci/${script}.sh\n`;
+    const repo = makeRepo({
+      '.github/workflows/ci.yml': `${run('semgrep')}${run('shellcheck')}`,
+    });
+    repo.write('.github/workflows/ci.yml', run('shellcheck'));
+    const dropped = repo.run(guard);
+    expect(dropped.status).toBe(1);
+    expect(dropped.output).toContain('[scanner-removed] .github/workflows/ci.yml');
+    repo.write('.github/workflows/weekly.yml', run('semgrep'));
+    expect(repo.run(guard)).toMatchObject({ status: 0 });
+  });
+
+  it('leaves the same flags alone outside the scanners’ own scripts and in the docs', () => {
+    const repo = makeRepo();
+    repo.write('scripts/ci/fetch.sh', 'curl -fsS -L -o out https://example.test/x\n');
+    repo.write('scripts/ci/semgrep.sh', 'semgrep scan --severity ERROR --error --strict\n');
+    repo.write('docs/notes.md', `${CONTINUE}, ${k('--exclude', '-rule')} and ${SC_DISABLE}\n`);
+    expect(repo.run(guard)).toMatchObject({ status: 0 });
   });
 
   it('flags a change even before it is committed or added', () => {

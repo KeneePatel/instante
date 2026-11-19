@@ -127,7 +127,7 @@ else {
 
 const highs = judged.filter((j) => j.high);
 const lines = [
-  `check-osv: ${String(lockfilePackages.size)} packages in pnpm-lock.yaml, ${String(judged.length)} advisory group(s), ${String(highs.length)} at high or above`,
+  `check-osv: ${String(lockfilePackages.size)} package names in pnpm-lock.yaml, ${String(judged.length)} advisory group(s), ${String(highs.length)} at high or above`,
   ...highs.map((j) => `  HIGH   ${j.ids.join(' / ')}  ${j.where}: ${j.verdict}`),
   ...judged
     .filter((j) => !j.high)

@@ -85,21 +85,33 @@ interface Diff {
 function walk(text: string): Diff {
   const diff: Diff = { added: [], removed: [], deleted: [], newFiles: [] };
   const pathOf = (s: string): string => s.replace(/^[ab]\//, '');
+  // An empty new file has no ---/+++ lines, only `diff --git a/P b/P` and `new file mode`.
+  const samePath = (s: string): string => {
+    const rest = s.slice('diff --git '.length);
+    const p = rest.slice(2, 2 + (rest.length - 5) / 2);
+    return rest === `a/${p} b/${p}` ? p : '';
+  };
+  const addNew = (f: string): void => {
+    if (f !== '' && !diff.newFiles.includes(f)) diff.newFiles.push(f);
+  };
   let file = '';
   let oldFile = '';
+  let headerPath = '';
   let inHeader = false;
   for (const line of text.split('\n')) {
     if (line.startsWith('diff ')) {
       inHeader = true;
+      headerPath = samePath(line);
     } else if (line.startsWith('@@')) {
       inHeader = false;
     } else if (inHeader) {
-      if (line.startsWith('--- ')) oldFile = pathOf(line.slice(4));
+      if (line.startsWith('new file mode')) addNew(headerPath);
+      else if (line.startsWith('--- ')) oldFile = pathOf(line.slice(4));
       else if (line.startsWith('+++ ')) {
         const newFile = pathOf(line.slice(4));
         file = newFile === '/dev/null' ? oldFile : newFile;
         if (newFile === '/dev/null') diff.deleted.push(file);
-        if (oldFile === '/dev/null') diff.newFiles.push(file);
+        if (oldFile === '/dev/null') addNew(file);
       }
     } else if (line.startsWith('+')) {
       diff.added.push({ file, text: line.slice(1) });
@@ -162,6 +174,7 @@ const SUPPRESSIONS: RegExp[] = [
   /(istanbul|c8|v8) ignor[e]/,
   /nosemgre[p]/,
   /gitleaks:allo[w]/,
+  /shellcheck\s+disabl[e]/,
 ];
 // 2. Unfinished work.
 const STUBS: RegExp[] = [
@@ -362,6 +375,50 @@ for (const r of removedRules) {
   }
   const verdict = compareThresholds(thresholds(r.text), thresholds(a.text));
   if (verdict !== null) flag(verdict, r.file, `${r.text}  ->  ${a.text}`);
+}
+
+// 9. A scanner told to look at less (CONSTRAINTS.md's ShellCheck, osv-scanner and Semgrep rows):
+// its own ignore or configuration file, new or changed, even empty (a .semgrepignore replaces
+// Semgrep's defaults); a flag that skips files, rules or failures, in a workflow or the scripts
+// that run the scanners (a step's continue-on-error turns its job's check green); and a
+// workflow that stops running one of them.
+const SCANNER_CONFIG = /(^|\/)(\.shellcheckr[c]|\.semgrepignor[e]|osv-scanner\.tom[l])$/;
+const runsScanners = (f: string): boolean =>
+  /^\.github\/workflows\/[^/]+\.ya?ml$/.test(f) || f.startsWith('scripts/ci/');
+const SCANNER_FLAGS: RegExp[] = [
+  /continue-on-erro[r]/,
+  /-exclud[e]/,
+  /--includ[e]/,
+  /--no-erro[r]/,
+  /--allow-no-lockfile[s]/,
+  /--offlin[e]/,
+];
+// Flags that mean something else to other tools, checked only where that scanner runs.
+const SCANNER_FLAGS_IN = new Map<string, RegExp[]>([
+  ['scripts/ci/osv-scan.sh', [/--confi[g]/, /--lockfil[e]/, /(^|\s)-[L](\s|=|$)/]],
+  ['scripts/ci/shellcheck.sh', [/(^|\s)-[eS](\s|=|$)/, /--severit[y]/]],
+]);
+const SCANNER_RUNS = /scripts\/ci\/(osv-scan|semgrep|shellcheck)\.s[h]|gitleaks gi[t]/g;
+for (const f of newFiles) {
+  if (SCANNER_CONFIG.test(f)) flag('scanner-weakened', f, 'a scanner configuration file');
+}
+for (const { file: f, text } of added) {
+  if (SCANNER_CONFIG.test(f) && !newFiles.includes(f)) flag('scanner-weakened', f, text);
+  if (!runsScanners(f)) continue;
+  for (const p of [...SCANNER_FLAGS, ...(SCANNER_FLAGS_IN.get(f) ?? [])]) {
+    if (p.test(text)) flag('scanner-weakened', f, text);
+  }
+}
+const stillRun = new Set(
+  added
+    .filter((a) => /^\.github\/workflows\//.test(a.file))
+    .flatMap((a) => [...a.text.matchAll(SCANNER_RUNS)].map((m) => m[0])),
+);
+for (const { file: f, text } of removed) {
+  if (!/^\.github\/workflows\//.test(f)) continue;
+  for (const [run] of text.matchAll(SCANNER_RUNS)) {
+    if (!stillRun.has(run)) flag('scanner-removed', f, text);
+  }
 }
 
 for (const f of reasoned) {

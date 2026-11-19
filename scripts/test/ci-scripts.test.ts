@@ -272,7 +272,8 @@ describe('shellcheck.sh', () => {
       }),
     ).toMatchObject({ status: 2 });
     const some = repo({ 'scripts/a.sh': 'echo a\n' });
-    const missing = run('shellcheck.sh', [], { cwd: some, env: { PATH: '/usr/bin:/bin' } });
+    // An empty PATH: the runner's own ShellCheck (apt's) is in /usr/bin.
+    const missing = run('shellcheck.sh', [], { cwd: some, env: { PATH: stubs({}) } });
     expect(missing.status).toBe(2);
     expect(missing.output).toContain("shellcheck isn't on PATH");
   });
