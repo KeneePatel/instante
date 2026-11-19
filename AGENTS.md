@@ -38,9 +38,9 @@ Instante is built in the phases set out in [`docs/sdlc.md`](docs/sdlc.md). The c
 Dependabot (`.github/dependabot.yml`) only proposes updates. Its commits are `dependabot[bot]`'s, with a `Signed-off-by` trailer, so `check-commits` and the `guards` job refuse them by design, and they never reach `main`. An agent takes an update over, and the owner says yes before it merges (the owner's choice, 2026-11-19):
 
 ```bash
-git fetch origin <dependabot's branch>
+git fetch origin main <dependabot's branch>
 git switch -c deps-<name> origin/main
-git cherry-pick --no-commit FETCH_HEAD
+git cherry-pick --no-commit origin/<dependabot's branch>
 pnpm install --frozen-lockfile
 git commit -m "Update <package> from <old> to <new>"
 git push origin deps-<name>

@@ -4,8 +4,8 @@
 
 ## Floor (always enforced, from the first commit with code)
 
-- **No new suppression comments:** `@ts-ignore`, `@ts-nocheck`, `@ts-expect-error` without a reason, `eslint-disable` in any form, ESLint inline configuration comments, `istanbul ignore`, `c8 ignore` and `v8 ignore` in any form, `nosemgrep`, `gitleaks:allow`, `shellcheck disable`. ESLint runs with `linterOptions.noInlineConfig` and `reportUnusedDisableDirectives`.
-- **No scanner told to look at less:** no new or changed `.shellcheckrc`, `.semgrepignore` or `osv-scanner.toml`; no flag in a workflow or `scripts/ci/` that skips files, rules or failures (`continue-on-error` among them); no workflow that stops running a scanner.
+- **No new suppression comments:** `@ts-ignore`, `@ts-nocheck`, `@ts-expect-error` without a reason, `eslint-disable` in any form, ESLint inline configuration comments, `istanbul ignore`, `c8 ignore` and `v8 ignore` in any form, `nosemgrep` or `nosem` in any case, `gitleaks:allow`, a `shellcheck` directive's `disable=` key, in any shell script under `scripts/`, extension or none. ESLint runs with `linterOptions.noInlineConfig` and `reportUnusedDisableDirectives`.
+- **No scanner told to look at less:** no new, changed or renamed-in `.shellcheckrc` or `shellcheckrc`, `.semgrepignore`, `osv-scanner.toml`, `.gitleaksignore` or `.gitleaks.toml`; no flag in a workflow or `scripts/ci/` that skips files, rules or failures (`continue-on-error` among them), no `SHELLCHECK_OPTS` or gitleaks configuration variable there, and no scanner run whose failure a workflow line swallows; no workflow that stops running a scanner. `scripts/test/scanner-pins.test.ts` pins how CI runs each check, and no line comes out of it without a reason in the commit message.
 - **No unfinished work:** stubs that throw "not implemented", empty `catch {}` blocks, `TODO` standing where the implementation should be.
 - **No skipped tests:** no skipped, `.only` or deleted tests without a reason in the commit message.
 - **No secrets and no real people's data:** no secrets in source. No real person's data in fixtures, tests, screenshots or docs: use the Jordan Rivera persona and anonymized postings.

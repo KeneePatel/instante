@@ -26,7 +26,7 @@ A failure reopens ADR-001, ADR-002, ADR-005 or ADR-012 while the cost is one mod
 
 1. Instante runs on the owner's Mac as [ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md) describes: local processes on loopback and sockets, a database cluster of its own, started by hand with `instante start`, and opened at `http://instante.localhost:4310`. Nothing is reachable from another machine.
 2. Cache Components is off (decision D6, approved). The root layout awaits `headers()`, so every page renders dynamically and gets a fresh nonce, and CI checks that `next build` reports no static page.
-3. There's no Docker anywhere except CI's `postgres:18` service on Linux.
+3. There's no Docker anywhere except in CI on Linux: the `postgres:18` service and Semgrep's image, each pinned by digest.
 4. Real use gets no sign-in or data in this module. The real-use database is disposable until the alpha ([`sdlc.md`](../sdlc.md#phase-3-build-in-slices)).
 5. The Mac runs macOS 27 with `/bin/bash` 3.2, and has `lockf`, `lsof` and `realpath`. The CI job checks the same on its runner.
 
@@ -362,12 +362,12 @@ The subcommands:
 - **`.github/workflows/ci.yml`,** on pushes and pull requests. It holds no secrets, because nothing deploys from CI. Its jobs, mostly in parallel:
   - format, lint and types;
   - unit and integration tests on a `postgres:18` service, started with `POSTGRES_INITDB_ARGS` for the pinned locale and set to Postgres's non-durable settings (`fsync`, `full_page_writes` and `synchronous_commit` off), since every `DROP DATABASE` forces a checkpoint and the runner's disk made those slow enough to time tests out; with coverage of changed lines;
-  - the floor guard, and the check on committed `.claude/` settings;
+  - the floor guard, and the check on committed `.claude/` settings. `scripts/test/scanner-pins.test.ts`, which the guard treats as part of the bar, pins how CI runs each check: every checking job present with no condition, allowed failure or shell of its own, the triggers, each job's commands, the `package.json` commands CI calls, each scanner's exact arguments, and CONSTRAINTS.md's CVSS bar against `scripts/check-osv.ts`;
   - gitleaks over git;
   - osv-scanner, Semgrep and ShellCheck (decided in T18):
-    - ShellCheck 0.11.0, the Mac's version, over every shell script in `scripts/` (`scripts/ci/shellcheck.sh`);
+    - ShellCheck 0.11.0, the Mac's version, over every shell script in `scripts/` (`scripts/ci/shellcheck.sh`), with no rc file and no `SHELLCHECK_OPTS`;
     - osv-scanner 2.7.0, judged by `scripts/check-osv.ts`, since osv-scanner has no threshold of its own: a CVSS score of 7.0 or more, a HIGH or CRITICAL rating, a malicious package or no severity at all fails, and both documents of pnpm 12's lockfile must have been read. `osv-weekly.yml` runs the same scan each Monday, in a workflow of its own, since a schedule in `ci.yml` would share `main`'s concurrency group;
-    - Semgrep 1.183.0's image, pinned by digest, for new ERROR findings since the base commit only (`scripts/ci/scan-base.sh`, shared with gitleaks), with `--strict`;
+    - Semgrep 1.183.0's image, pinned by digest, for new ERROR findings since the base commit only (`scripts/ci/scan-base.sh`, shared with gitleaks), with `--strict`; a canary (`scripts/ci/semgrep-canary.sh`) checks in the same image that a finding the base already had passes and a new one fails;
     - every tool downloaded at a pinned version, its SHA-256 checked (`scripts/ci/fetch-checked.sh`);
   - the production build (`scripts/prod-build-check.sh`), in production mode in a scratch home, against the Postgres service through a relay on the home's socket: criterion 7 apart from the web app's launch flags, and T15's start-up check;
   - end-to-end tests with axe, against a production build started the way `instante start` starts it. Playwright waits on the backend's `/readyz` rather than a page, since a page needs the right `Host`, and the slow-route test gets its own 45-second timeout;
