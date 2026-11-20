@@ -169,6 +169,9 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Floor guard
         run: pnpm floor-guard
+      # By its path, so a narrowed test include can't leave the pins out.
+      - name: The checks' pins
+        run: pnpm exec vitest run --project scripts scripts/test/scanner-pins.test.ts
       - name: Commits authored as the owner, no trailers
         run: pnpm check:commits
       - name: Agent settings
@@ -273,6 +276,7 @@ jobs:
         env:
           BEFORE: ${{ github.event.before }}
         run: bash scripts/ci/semgrep.sh
-      # The baseline above only runs once a change touches a file with an older finding.
+      # Semgrep scans the base only when the changed files have a finding, which a clean run
+      # never reaches.
       - name: The baseline drops a finding the base had, and keeps a new one
         run: bash scripts/ci/semgrep-canary.sh

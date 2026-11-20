@@ -241,41 +241,101 @@ describe('floor-guard', () => {
 
   describe('the checks’ pins', () => {
     const PINS = 'scripts/test/scanner-pins.test.ts';
-    const pins = "expect(a).toBe('x');\nconst RUNS = [\n  'run: bash scripts/ci/semgrep.sh',\n];\n";
+    const DATA = 'scripts/test/scanner-pins.json';
+    const pins =
+      "const PINS = read();\nit('pins', () => {\n  expect(hash(job)).toBe(PINS.job);\n});\n";
+    const data = (jobs: Record<string, string>, args = ['a', 'b']): string =>
+      `${JSON.stringify({ jobs, arguments: { semgrep: args }, cvss: '7.0' }, null, 2)}\n`;
+    const pinned = { [PINS]: pins, [DATA]: data({ semgrep: 'aaa' }) };
 
-    it('flags a line taken out, and passes one moved or added', () => {
-      const repo = makeRepo({ [PINS]: pins });
-      repo.write(PINS, pins.replace("  'run: bash scripts/ci/semgrep.sh',\n", ''));
-      const loosened = repo.run(guard);
-      expect(loosened.status).toBe(1);
-      expect(loosened.output).toContain(
-        `[pin-loosened] ${PINS}: 'run: bash scripts/ci/semgrep.sh'`,
-      );
+    it('flags a line added to the test or taken out of it, and passes one moved', () => {
+      const added = makeRepo(pinned);
+      added.write(PINS, pins.replace('() => {\n', "() => {\n  if (process.env['CI']) return;\n"));
+      expect(added.run(guard).output).toContain(`[pin-changed] ${PINS}: +if (process.env['CI'])`);
+      const taken = makeRepo(pinned);
+      taken.write(PINS, pins.replace('  expect(hash(job)).toBe(PINS.job);\n', ''));
+      expect(taken.run(guard).output).toContain(`[pin-changed] ${PINS}: -expect(hash(job))`);
+      const moved = makeRepo(pinned);
       const [first, ...rest] = pins.trimEnd().split('\n');
-      repo.write(PINS, `${[...rest, first].join('\n')}\n`);
-      expect(repo.run(guard)).toMatchObject({ status: 0 });
-      repo.write(PINS, `${pins}expect(b).toBe('z');\n`);
-      expect(repo.run(guard)).toMatchObject({ status: 0 });
+      moved.write(PINS, `${[...rest, first].join('\n')}\n`);
+      expect(moved.run(guard)).toMatchObject({ status: 0 });
     });
 
-    it('passes a line taken out by a commit that says why', () => {
-      const repo = makeRepo({ [PINS]: pins });
-      repo.write(PINS, pins.replace("expect(a).toBe('x');\n", "expect(a).toBe('y');\n"));
-      repo.commit(`Move the pin\n\nTests removed from ${PINS}: the value moved to the image's tag`);
-      const result = repo.run(guard);
-      expect(result.status).toBe(0);
-      expect(result.output).toContain("the value moved to the image's tag");
+    it('flags a pinned value changed or removed, or a list grown, and passes a pin added', () => {
+      const changed = makeRepo(pinned);
+      changed.write(DATA, data({ semgrep: 'bbb' }));
+      expect(changed.run(guard).output).toContain(`[pin-loosened] ${DATA}: jobs › semgrep: "bbb"`);
+      const removed = makeRepo(pinned);
+      removed.write(DATA, data({}));
+      expect(removed.run(guard).output).toContain(`${DATA}: jobs › semgrep: nothing`);
+      const grown = makeRepo(pinned);
+      grown.write(DATA, data({ semgrep: 'aaa' }, ['a', 'b', k('--exclude', '-rule')]));
+      expect(grown.run(guard).output).toContain('[pin-loosened]');
+      const added = makeRepo(pinned);
+      added.write(DATA, data({ semgrep: 'aaa', e2e: 'ccc' }));
+      expect(added.run(guard)).toMatchObject({ status: 0 });
     });
 
-    it('flags the file gone, deleted or renamed', () => {
-      const deleted = makeRepo({ [PINS]: pins });
+    it('passes a change a commit gives a reason for, and no later change to it', () => {
+      const repo = makeRepo(pinned);
+      repo.write(DATA, data({ semgrep: 'bbb' }));
+      repo.write(PINS, pins.replace('PINS.job', 'PINS.jobs.semgrep'));
+      repo.commit('Pin the job by its id\n\nPins changed: the job moved under its own id');
+      const vouched = repo.run(guard);
+      expect(vouched.status).toBe(0);
+      expect(vouched.output).toContain('the job moved under its own id');
+      repo.write(DATA, data({ semgrep: 'ccc' }));
+      repo.commit('Change the job again');
+      expect(repo.run(guard).output).toContain(`[pin-loosened] ${DATA}: jobs › semgrep: "ccc"`);
+    });
+
+    it('flags either file gone, deleted or renamed', () => {
+      const deleted = makeRepo(pinned);
       deleted.remove(PINS);
-      expect(deleted.run(guard).output).toContain('[pin-removed]');
-      const renamed = makeRepo({ [PINS]: pins });
-      renamed.git(['mv', PINS, 'scripts/test/pins.ts']);
+      expect(deleted.run(guard).output).toContain(`[pin-removed] ${PINS}`);
+      const renamed = makeRepo(pinned);
+      renamed.git(['mv', DATA, 'scripts/test/pins.json']);
       renamed.commit('Rename the pins');
-      expect(renamed.run(guard).output).toContain('[pin-removed]');
+      expect(renamed.run(guard).output).toContain(`[pin-removed] ${DATA}`);
     });
+  });
+
+  // A commit that moves an assertion within its file vouches for nothing a later one removes.
+  it('takes no reason for an assertion a commit only moved', () => {
+    const test = "it('a', () => {\n  expect(1).toBe(1);\n});\nit('b', () => {});\n";
+    const repo = makeRepo({ 'src/a.test.ts': test });
+    repo.write(
+      'src/a.test.ts',
+      test.replace('  expect(1).toBe(1);\n', '') + '// moved\n  expect(1).toBe(1);\n',
+    );
+    repo.commit('Move it\n\nTests removed from src/a.test.ts: only moving the assertion here');
+    repo.write('src/a.test.ts', test.replace('  expect(1).toBe(1);\n', ''));
+    repo.commit('Drop it');
+    expect(repo.run(guard).output).toContain('[assertion-removed] src/a.test.ts');
+  });
+
+  it.each([
+    ['test-made-easier', 'src/a.test.ts', k('it.skip', "If(true)('a', () => {});\n")],
+    ['test-made-easier', 'src/a.test.ts', k('it.run', "If(false)('a', () => {});\n")],
+    ['test-made-easier', 'vitest.config.ts', k('  test: { passWithNo', 'Tests: true },\n')],
+    ['test-made-easier', 'package.json', k('{ "vitest": { "passWithNo', 'Tests": true } }\n')],
+    ['silenced-checker', 'scripts/x.bash', `#!/bin/bash\n# ${SC_DISABLE}=SC2086\necho $1\n`],
+    [
+      'scanner-weakened',
+      '.github/workflows/ci.yml',
+      k("        run: printf 'x\\n' > .gitleaks", 'ignore\n'),
+    ],
+    [
+      'scanner-weakened',
+      '.github/workflows/ci.yml',
+      k('        run: git update', '-ref refs/remotes/origin/main HEAD\n'),
+    ],
+  ])('flags %s in %s', (rule, path, text) => {
+    const repo = makeRepo();
+    repo.write(path, text);
+    const result = repo.run(guard);
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(`[${rule}]`);
   });
 
   it('flags a change even before it is committed or added', () => {
@@ -523,6 +583,14 @@ describe('floor-guard', () => {
       const lowered = makeRepo({ 'CONSTRAINTS.md': failing });
       lowered.write('CONSTRAINTS.md', failing.replace('7.0 or more', '4.0 or more'));
       expect(lowered.run(guard)).toMatchObject({ status: 0 });
+    });
+
+    // Only "fails on", "at" or "from" turns a number round: "fail fast" says nothing of it.
+    it('leaves a number after “fail fast” as it reads', () => {
+      const fast = `${constraints}| Unit tests | fail fast, in 5 s or less | vitest |\n`;
+      const repo = makeRepo({ 'CONSTRAINTS.md': fast });
+      repo.write('CONSTRAINTS.md', fast.replace('5 s or less', '9 s or less'));
+      expect(repo.run(guard).output).toContain('[threshold-loosened]');
     });
 
     it('flags a rule removed and a new exception row', () => {

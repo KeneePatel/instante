@@ -1,0 +1,84 @@
+{
+  "_": "How CI runs each check, pinned, as scripts/test/scanner-pins.test.ts reads it. A value changed or removed here needs a `Pins changed: <reason>` line in the message of the commit that changes it; a pin added needs none.",
+  "workflows": {
+    ".github/workflows/ci.yml": {
+      "top": "c625964dd4f5f98e6372c20a42083c0870c5eeae33ac2311e93ed9c9c6f91a7a",
+      "jobs": {
+        "install": "aa85c5363d67c3951c6dd4e7ce35bcca89a0c6e84c0d031c788aef36b8dab164",
+        "checks": "8fa21a5d79e44bab11bfeefdb9a813ae97b33e3e71de0d0146847cfb6f0d6df9",
+        "production-build": "42edb390a3b0c573038ea86d7ca6f3ac65a84c5e3bbd8cc1703f9507bad186a9",
+        "guards": "95bf5e178d1b4be5f585d0c3f1936cbfb3b424c140a58cf62c81313be1311936",
+        "gitleaks": "406cac2bd445e95b8603475e94121550a9060cce2bf1b949ac45dc2e31e29311",
+        "shellcheck": "8f28521a869bbeb44f82d4379e0be498bb2402f4912c6f3379c940fe0ea81a4c",
+        "osv-scanner": "390b0939908c36cf8e614ee647065da4f2544275416a4982cf9d00034728519c",
+        "semgrep": "d7d065eb2cd29bed51c29912257999d2ccefea2669306fca38bcec6099ae4d16"
+      }
+    },
+    ".github/workflows/osv-weekly.yml": {
+      "top": "30c8dfbc35989bfeae856104748e8dfc3e4940e0aa2031862923d8d4fbd4fde6",
+      "jobs": {
+        "osv-scanner-weekly": "8461a24c86c4b608a5c9dbdbc732c6064f2540e6b181813ead1f9d8062b0f150"
+      }
+    }
+  },
+  "files": {
+    "scripts/ci/fetch-checked.sh": "6896ef971b9a8e0b50d7cac4391dc018a454fbfddd90c591d24facf1a776fe27",
+    "scripts/ci/scan-base.sh": "9cc5f96c58fc3ccbd1e9a5ecdc2d2531bd63930af7028860b754041866039b04",
+    "scripts/ci/shellcheck.sh": "421fb022918268ab261d0d55fe2ec459285e182ee2369adf1beb0c70fa8bf2be",
+    "scripts/ci/install-osv-scanner.sh": "96cedf4c32fcebf7b1523e805108e6720786c093cf8667c0aabe7ef3164ee460",
+    "scripts/ci/osv-scan.sh": "06b53240fa0a46b8e63f346a316e1b03e2bce293f2f20845a7deadca0369da7c",
+    "scripts/ci/semgrep.sh": "64c96b82271a0cdf9589a31ad827365b2891ed192bd41ad964872f7517333500",
+    "scripts/ci/semgrep-canary.sh": "1ffaaccb8bdcac610f13b27a4b5c008cd6204cd8b210d11e640d62fdf04c6c0b",
+    "scripts/check-osv.ts": "cb0c2481d587d8a9dee00c808a3a7224327e2a1dc341338343e9973d88ab1632"
+  },
+  "commands": {
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit -p . && pnpm -r typecheck",
+    "lint": "eslint --max-warnings 0 .",
+    "test:coverage": "vitest run --coverage",
+    "floor-guard": "node scripts/floor-guard.ts",
+    "check:commits": "node scripts/check-commits.ts",
+    "check:agent-settings": "node scripts/check-agent-settings.ts"
+  },
+  "arguments": {
+    "semgrep": [
+      "run",
+      "--rm",
+      "--user",
+      "{uid}:{gid}",
+      "-e",
+      "HOME=/tmp",
+      "-e",
+      "SEMGREP_ENABLE_VERSION_CHECK=0",
+      "-v",
+      "{repo}:/src",
+      "-w",
+      "/src",
+      "{image}",
+      "semgrep",
+      "scan",
+      "--config",
+      "p/default",
+      "--baseline-commit",
+      "{base}",
+      "--severity",
+      "ERROR",
+      "--error",
+      "--strict",
+      "--metrics=off"
+    ],
+    "osv-scanner": [
+      "scan",
+      "source",
+      "-r",
+      "--all-packages",
+      "--format",
+      "json",
+      "--output-file",
+      "{report}",
+      "."
+    ],
+    "shellcheck": ["--norc", "--", "scripts/a.sh", "scripts/c", "scripts/local/instante"]
+  },
+  "cvss": "7.0"
+}

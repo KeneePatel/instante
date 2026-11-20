@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Semgrep's baseline, checked in the image SEMGREP_IMAGE names and run as scripts/ci/semgrep.sh
-# runs it (the runner's user, HOME=/tmp, the repository mounted at /src), since semgrep.sh only
-# reaches it once a change touches a file that already has an ERROR finding. In a scratch
-# repository whose base commit already has a finding, a head commit that keeps it must pass,
-# and one that adds another must fail. It brings a rule of its own, so it needs no registry and
-# p/default can't change its result.
+# runs it (the runner's user, HOME=/tmp, the repository mounted at /src), since Semgrep scans
+# the base only when the changed files have a finding, which a clean run never reaches. In a
+# scratch repository whose base commit already has a finding, a head commit that keeps it must
+# pass, and one that adds another must fail. It brings a rule of its own, so it needs no
+# registry and p/default can't change its result.
 # Exit codes: 0 the baseline works, 1 it doesn't, 2 the check couldn't run.
 set -u -o pipefail
 

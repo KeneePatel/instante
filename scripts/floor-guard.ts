@@ -128,20 +128,69 @@ function walk(text: string): Diff {
 }
 const { added, removed, deleted, newFiles } = walk(`${tracked}\n${untracked}`);
 
-// What the branch's own commits removed with a reason: each such commit vouches for the test
-// files it deletes and the assertion lines it removes, in the file its message names (by its
-// name before or after a rename in that commit), once for each line it removed.
+// The checks' pins (rule 10): their data, and the test that reads it.
+const PINS = 'scripts/test/scanner-pins.test.ts';
+const PINS_DATA = 'scripts/test/scanner-pins.json';
+
+// Lines a diff adds and removes in one file, less those it only moves (the same text taken out
+// and put back), blank ones aside: `${'+' or '-'}${text}`, counted.
+const lineKey = (f: string, text: string): string => `${f}\n${text.trim()}`;
+function unmoved(d: Diff, f: string): Map<string, number> {
+  const out = new Map<string, number>();
+  const bump = (k: string, by: number): void => {
+    out.set(k, (out.get(k) ?? 0) + by);
+  };
+  for (const l of d.added) if (l.file === f && l.text.trim() !== '') bump(`+${l.text.trim()}`, 1);
+  for (const l of d.removed) {
+    if ((l.file !== f && l.from !== f) || l.text.trim() === '') continue;
+    const back = `+${l.text.trim()}`;
+    if ((out.get(back) ?? 0) > 0) bump(back, -1);
+    else bump(`-${l.text.trim()}`, 1);
+  }
+  return out;
+}
+
+// The pins' data as JSON, null when the file isn't there; text that isn't JSON pins nothing.
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+function pinData(text: string | null): unknown {
+  if (text === null) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return 'not JSON';
+  }
+}
+// Each pinned value `base` holds that `now` changes or drops, as `<path>: <value now>`. A key
+// added is a pin added, so it isn't listed; a list or a value is one pin, compared whole.
+function loosenedPins(base: unknown, now: unknown, at: string[] = []): string[] {
+  if (isRecord(base)) {
+    const here = isRecord(now) ? now : {};
+    return Object.keys(base).flatMap((k) => loosenedPins(base[k], here[k], [...at, k]));
+  }
+  const is = now === undefined ? 'nothing' : JSON.stringify(now);
+  return JSON.stringify(base) === is ? [] : [`${at.join(' › ')}: ${is}`];
+}
+
+// What the branch's own commits changed with a reason.
+//   - `Tests removed from <file>: <reason>` vouches for the test files the commit deletes and
+//     the assertion lines it removes in that file (by its name before or after a rename in that
+//     commit), once for each line it removed and didn't put back.
+//   - `Pins changed: <reason>` vouches for each line the commit adds or removes in the pins'
+//     test, and each pinned value it changes or removes, as the commit leaves it.
 const commits = git(['rev-list', '--no-merges', `${mergeBase}..HEAD`]);
 if (commits === null) bail(`could not list the commits since ${mergeBase}`);
 const reasons = new Map<string, string>();
 const vouchedDeletes = new Set<string>();
 const vouchedLines = new Map<string, number>();
-const lineKey = (f: string, text: string): string => `${f}\n${text.trim()}`;
+const vouchedPinLines = new Map<string, number>();
+const vouchedPinValues = new Set<string>();
 for (const commit of commits.split('\n').filter(Boolean)) {
   const message = git(['log', '-1', '--format=%B', commit]);
   if (message === null) bail(`could not read commit ${commit}`);
   const named = [...message.matchAll(/^Tests removed from (\S+): (\S.{9,})$/gm)];
-  if (named.length === 0) continue;
+  const pinsWhy = /^Pins changed: (\S.{9,})$/m.exec(message)?.[1];
+  if (named.length === 0 && pinsWhy === undefined) continue;
   const shown = git(['show', '-M', '--unified=0', '--format=', commit]);
   if (shown === null) bail(`could not read what ${commit} changed`);
   const changes = walk(shown);
@@ -149,12 +198,30 @@ for (const commit of commits.split('\n').filter(Boolean)) {
     if (where === undefined || why === undefined) continue;
     reasons.set(where, why.trim());
     if (changes.deleted.includes(where)) vouchedDeletes.add(where);
+    const putBack = new Map<string, number>();
+    for (const l of changes.added) {
+      putBack.set(lineKey(l.file, l.text), (putBack.get(lineKey(l.file, l.text)) ?? 0) + 1);
+    }
     for (const line of changes.removed) {
       if (line.file !== where && line.from !== where) continue;
       const key = lineKey(line.file, line.text);
+      const back = putBack.get(lineKey(line.file, line.text)) ?? 0;
+      if (back > 0) {
+        putBack.set(key, back - 1);
+        continue;
+      }
       vouchedLines.set(key, (vouchedLines.get(key) ?? 0) + 1);
       if (line.file !== where) reasons.set(line.file, why.trim());
     }
+  }
+  if (pinsWhy !== undefined) {
+    reasons.set(PINS, pinsWhy.trim());
+    for (const [k, n] of unmoved(changes, PINS)) {
+      if (n > 0) vouchedPinLines.set(k, (vouchedPinLines.get(k) ?? 0) + n);
+    }
+    const before = pinData(git(['show', `${commit}^:${PINS_DATA}`]));
+    const after = pinData(git(['show', `${commit}:${PINS_DATA}`]));
+    for (const v of loosenedPins(before ?? {}, after)) vouchedPinValues.add(v);
   }
 }
 
@@ -163,15 +230,15 @@ const flag = (rule: string, where: string, text: string): void => {
   findings.push({ rule, file: where, text: text.trim().slice(0, 120) });
 };
 
-// A shell script under scripts/ needs no extension: scripts/ci/shellcheck.sh picks it by its
-// first line, as the launcher in scripts/local/ will be.
+// A shell script under scripts/ is one by its first line, whatever its extension, as
+// scripts/ci/shellcheck.sh picks them: the launcher in scripts/local/ will have none.
 const startsAsShell = (f: string): boolean => {
-  if (!f.startsWith('scripts/') || /\.[^/]*$/.test(f.slice(f.lastIndexOf('/') + 1))) return false;
-  const first = existsSync(f) ? (readFileSync(f, 'utf8').split('\n', 1)[0] ?? '') : '';
+  if (!f.startsWith('scripts/') || !existsSync(f)) return false;
+  const first = readFileSync(f, 'utf8').slice(0, 200).split('\n', 1)[0] ?? '';
   return /^#!.*\b(ba)?sh\b/.test(first);
 };
 const isCode = (f: string): boolean =>
-  /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|sh|ya?ml|css)$/.test(f) || startsAsShell(f);
+  /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|sh|bash|ya?ml|css)$/.test(f) || startsAsShell(f);
 const isTest = (f: string): boolean => /\.(test|spec)\.[cm]?[jt]sx?$/.test(f);
 const isConstraints = (f: string): boolean => f === 'CONSTRAINTS.md';
 
@@ -197,7 +264,12 @@ const STUBS: RegExp[] = [
   /\bTOD[O]\b/,
 ];
 // 3. A test made easier.
-const SKIPS: RegExp[] = [/\.(ski[p]|onl[y]|tod[o])\(/, /\b(xi[t]|xdescrib[e]|xtes[t])\(/];
+const SKIPS: RegExp[] = [
+  /\.(ski[p]|onl[y]|tod[o]|skipI[f]|runI[f])\(/,
+  /\b(xi[t]|xdescrib[e]|xtes[t])\(/,
+  // A run that finds no test file passes.
+  /passWithNoTest[s]/,
+];
 
 // 4. The web app's bans (ADR-005), and the auth rule (ADR-004).
 const WEB_BANS: RegExp[] = [
@@ -228,6 +300,8 @@ for (const { file: f, text } of added) {
     for (const p of SUPPRESSIONS) if (p.test(text)) flag('silenced-checker', f, text);
     for (const p of STUBS) if (p.test(text)) flag('unfinished-work', f, text);
     for (const p of SKIPS) if (p.test(text)) flag('test-made-easier', f, text);
+  } else if (/(^|\/)package\.json$/.test(f) && /passWithNoTest[s]/.test(text)) {
+    flag('test-made-easier', f, text);
   }
   if (f.startsWith('apps/web/') && isCode(f)) {
     for (const p of WEB_BANS) if (p.test(text)) flag('web-app-ban', f, text);
@@ -264,7 +338,6 @@ for (const f of deleted) {
   else flag('test-deleted', f, 'file deleted');
 }
 // The checks' pins (rule 10) count every line, so they're left to that rule.
-const PINS = 'scripts/test/scanner-pins.test.ts';
 for (const { file: f, text } of removed) {
   if (f === PINS || !isTest(f) || deleted.includes(f) || !/\b(expect|assert)\b/.test(text)) {
     continue;
@@ -347,7 +420,7 @@ const MIN_AFTER = /^\s*\S*\s*(or more|or higher|must not fall|must not drop)/;
 const MAX_AFTER = /^\s*\S*\s*(or less|or lower|must not grow|must not exceed)/;
 // After "fails on" (or "fail", "failing"), in the same clause, a number is where failing
 // starts, so its direction turns round: "fails on a score of 7.0 or more" is a ceiling.
-const FAILS_BEFORE = /\bfail(s|ed|ing)?\b[^.;:|()]*$/;
+const FAILS_BEFORE = /\bfails? (on|at|from|above|over|below|under)\b[^.;:|()]*$/;
 type Direction = 'min' | 'max' | null;
 const thresholds = (t: string): { n: number; dir: Direction }[] => {
   const out: { n: number; dir: Direction }[] = [];
@@ -412,6 +485,8 @@ for (const r of removedRules) {
 // How CI runs each one exactly is pinned in scripts/test/scanner-pins.test.ts (rule 10).
 const SCANNER_CONFIG =
   /(^|\/)(\.?shellcheckr[c]|\.semgrepignor[e]|osv-scanner\.tom[l]|\.gitleaksignor[e]|\.?gitleaks\.tom[l])$/;
+const SCANNER_CONFIG_NAMED =
+  /(\.?shellcheckr[c]|\.semgrepignor[e]|osv-scanner\.tom[l]|\.gitleaksignor[e]|gitleaks\.tom[l])\b/;
 const runsScanners = (f: string): boolean =>
   /^\.github\/workflows\/[^/]+\.ya?ml$/.test(f) || f.startsWith('scripts/ci/');
 const SCANNER_SCRIPTS = new Set([
@@ -455,6 +530,11 @@ for (const { file: f, text } of added) {
   if ((workflow && /continue-on-erro[r]/.test(text)) || SCANNER_ENV.test(text)) {
     flag('scanner-weakened', f, text);
   }
+  // A step or script that writes a scanner's configuration file, or moves the branch a scan's
+  // base comes from (scripts/ci/scan-base.sh, and the floor guard's own merge base).
+  if (SCANNER_CONFIG_NAMED.test(text) || /\bupdate-re[f]\b|refs\/remote[s]\//.test(text)) {
+    flag('scanner-weakened', f, text);
+  }
   const flags = SCANNER_SCRIPTS.has(f) || NAMES_A_SCANNER.test(text) ? SCANNER_FLAGS : [];
   for (const p of [...flags, ...(SCANNER_FLAGS_IN.get(f) ?? [])]) {
     if (p.test(text)) flag('scanner-weakened', f, text);
@@ -478,25 +558,48 @@ for (const { file: f, text } of removed) {
   }
 }
 
-// 10. The checks' pins: scripts/test/scanner-pins.test.ts pins how CI runs each check (no
-// condition, failure allowed or shell of its own on a checking job, the triggers, each scanner's
-// arguments, the package.json commands CI calls, the CVSS bar). It's part of the bar: a line
-// taken out of it is flagged (a moved or blank one isn't) unless the commit that takes it out
-// says why, as for a test, and so is the file gone. Adding a pin needs no reason.
+// 10. The checks' pins: scripts/test/scanner-pins.json holds how CI runs each check (each
+// checking job and the scanners' scripts by hash, the commands, the arguments, the CVSS bar), and
+// scanner-pins.test.ts checks the repository against it. Both are part of the bar, once they're
+// at the merge base:
+//   - a pinned value changed or removed in the data, unless a commit that changes it to what it
+//     is now says why (`Pins changed: <reason>`); a pin added isn't flagged;
+//   - any line added to or removed from the test (one only moved, or blank, aside), unless a
+//     commit that adds or removes it says why, since an added line can switch a pin off;
+//   - either file gone.
+const pinned: string[] = [];
 const pinsAtBase = git(['cat-file', '-e', `${mergeBase}:${PINS}`]) !== null;
-if (pinsAtBase && !existsSync(PINS)) flag('pin-removed', PINS, 'the checks’ pins are gone');
-for (const { file: f, text, from } of removed) {
-  if ((f !== PINS && from !== PINS) || text.trim() === '' || deleted.includes(f)) continue;
-  if (added.some((a) => a.file === f && a.text.trim() === text.trim())) continue;
-  const left = vouchedLines.get(lineKey(f, text)) ?? 0;
-  if (left > 0) {
-    vouchedLines.set(lineKey(f, text), left - 1);
-    reasoned.add(f);
-  } else flag('pin-loosened', f, text);
+const dataAtBase = git(['show', `${mergeBase}:${PINS_DATA}`]);
+if (pinsAtBase && !existsSync(PINS)) flag('pin-removed', PINS, 'the checks’ pins test is gone');
+if (dataAtBase !== null && !existsSync(PINS_DATA)) {
+  flag('pin-removed', PINS_DATA, 'the checks’ pins are gone');
+}
+if (pinsAtBase && existsSync(PINS)) {
+  for (const [k, n] of unmoved({ added, removed, deleted, newFiles }, PINS)) {
+    for (let i = 0; i < n; i += 1) {
+      const left = vouchedPinLines.get(k) ?? 0;
+      if (left > 0) {
+        vouchedPinLines.set(k, left - 1);
+        pinned.push(PINS);
+      } else flag('pin-changed', PINS, k);
+    }
+  }
+}
+if (dataAtBase !== null && existsSync(PINS_DATA)) {
+  const now = pinData(readFileSync(PINS_DATA, 'utf8'));
+  for (const v of loosenedPins(pinData(dataAtBase), now)) {
+    if (vouchedPinValues.has(v)) pinned.push(PINS_DATA);
+    else flag('pin-loosened', PINS_DATA, v);
+  }
 }
 
 for (const f of reasoned) {
   console.log(`floor-guard: tests removed from ${f}, as a commit says: ${reasons.get(f) ?? ''}`);
+}
+if (pinned.length > 0) {
+  console.log(
+    `floor-guard: the checks' pins changed, as a commit says: ${reasons.get(PINS) ?? ''}`,
+  );
 }
 if (findings.length === 0) {
   console.log('floor-guard: clean');
@@ -508,6 +611,7 @@ console.error(
   '\nEach lowers the bar. Fix the code, or ask the owner for an exception row in CONSTRAINTS.md.' +
     '\nA test deleted on purpose passes when the commit that removes it says why, in a line of' +
     ' its message: `Tests removed from <file>: <reason>`, ten characters or more of reason.' +
-    ` A line taken out of ${PINS} passes the same way.`,
+    ` A change to the checks' pins (${PINS_DATA} or ${PINS}) passes the same way, with` +
+    ' `Pins changed: <reason>` in the message of the commit that makes it.',
 );
 process.exit(1);
