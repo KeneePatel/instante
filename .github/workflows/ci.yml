@@ -169,6 +169,9 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Floor guard
         run: pnpm floor-guard
+      # The guard as main has it, which a change can't weaken.
+      - name: Floor guard, as main has it
+        run: bash scripts/ci/floor-guard-base.sh
       # By its path, so a narrowed test include can't leave the pins out.
       - name: The checks' pins
         run: pnpm exec vitest run --project scripts scripts/test/scanner-pins.test.ts

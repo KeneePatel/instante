@@ -7,7 +7,7 @@
         "install": "aa85c5363d67c3951c6dd4e7ce35bcca89a0c6e84c0d031c788aef36b8dab164",
         "checks": "8fa21a5d79e44bab11bfeefdb9a813ae97b33e3e71de0d0146847cfb6f0d6df9",
         "production-build": "42edb390a3b0c573038ea86d7ca6f3ac65a84c5e3bbd8cc1703f9507bad186a9",
-        "guards": "95bf5e178d1b4be5f585d0c3f1936cbfb3b424c140a58cf62c81313be1311936",
+        "guards": "8afeabd0c075bd1bd9b5391b1cf7cb7bceb7281d6b30cf944c0f47b61bb20130",
         "gitleaks": "406cac2bd445e95b8603475e94121550a9060cce2bf1b949ac45dc2e31e29311",
         "shellcheck": "8f28521a869bbeb44f82d4379e0be498bb2402f4912c6f3379c940fe0ea81a4c",
         "osv-scanner": "390b0939908c36cf8e614ee647065da4f2544275416a4982cf9d00034728519c",
@@ -29,6 +29,7 @@
     "scripts/ci/osv-scan.sh": "06b53240fa0a46b8e63f346a316e1b03e2bce293f2f20845a7deadca0369da7c",
     "scripts/ci/semgrep.sh": "64c96b82271a0cdf9589a31ad827365b2891ed192bd41ad964872f7517333500",
     "scripts/ci/semgrep-canary.sh": "1ffaaccb8bdcac610f13b27a4b5c008cd6204cd8b210d11e640d62fdf04c6c0b",
+    "scripts/ci/floor-guard-base.sh": "e150016597af4bf77ed19bfb5a690f8f565c94b39dccd14dacb784547036cb53",
     "scripts/check-osv.ts": "cb0c2481d587d8a9dee00c808a3a7224327e2a1dc341338343e9973d88ab1632"
   },
   "commands": {

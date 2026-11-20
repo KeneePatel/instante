@@ -349,6 +349,54 @@ describe('osv-scan.sh', () => {
   });
 });
 
+describe('floor-guard-base.sh', () => {
+  // A repository whose main has a guard that exits 1, and whose branch has one that exits 0.
+  function repo(withMain = true) {
+    const dir = scratch();
+    const git = (...args: string[]) =>
+      execFileSync('git', args, {
+        cwd: dir,
+        env: {
+          PATH: process.env['PATH'] ?? '',
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_AUTHOR_NAME: 'a',
+          GIT_AUTHOR_EMAIL: 'a@example.test',
+          GIT_COMMITTER_NAME: 'a',
+          GIT_COMMITTER_EMAIL: 'a@example.test',
+        },
+      });
+    git('init', '-q', '-b', 'main');
+    mkdirSync(path.join(dir, 'scripts'));
+    const guard = (said: string, exit: number) => {
+      writeFileSync(
+        path.join(dir, 'scripts/floor-guard.ts'),
+        `console.log('${said}');\nprocess.exit(${String(exit)});\n`,
+      );
+    };
+    guard('the guard main has', 1);
+    git('add', '-A');
+    git('commit', '-q', '-m', 'main');
+    if (withMain) git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+    guard('the branch’s guard', 0);
+    git('commit', '-q', '-am', 'weaken it');
+    return dir;
+  }
+  const env = { PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin` };
+
+  it('runs the guard main has, whatever the change did to its own', () => {
+    const result = run('floor-guard-base.sh', [], { cwd: repo(), env });
+    expect(result.status).toBe(1);
+    expect(result.output).toContain('the guard main has');
+  });
+
+  it('exits 2 with no merge base to take the guard from', () => {
+    const result = run('floor-guard-base.sh', [], { cwd: repo(false), env });
+    expect(result.status).toBe(2);
+    expect(result.output).toContain('no merge base');
+  });
+});
+
 describe('semgrep-canary.sh', () => {
   // A docker that answers each call with the next exit code given, recording its arguments;
   // CI runs the real image.
