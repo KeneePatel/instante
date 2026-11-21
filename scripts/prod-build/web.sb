@@ -1,0 +1,43 @@
+(version 1)
+; The web app's macOS sandbox (docs/specs/platform.md, `instante start`; the owner's choice,
+; 2026-11-16), around `next start` under Node's permission flags. Reads are allowed only inside
+; the release, judged by where the kernel lands, so the release's own pnpm links can't reach
+; past it as they can past the flags (T13). Network only to listen on the web port and to reach
+; the backend's; no new process, no signal to another, no write but /dev/null. Measured with
+; Next.js 16.4.5 and Node 26.13.1 on macOS 27 (T19); scripts/prod-build/stack.sh applies it.
+; Parameters, each a real path in the kernel's spelling, or a port: RELEASE, NODE, WEB_PORT,
+; BACKEND_PORT, and LOGS, the folder the web app's output is written to.
+(deny default)
+
+; Node itself, by its real path, and the folders above it.
+(allow process-exec (literal (param "NODE")))
+(allow file-read* file-map-executable (literal (param "NODE")))
+(allow file-read-metadata (path-ancestors (param "NODE")))
+
+; The release, and the folders above it (Node's realpath looks at each).
+(allow file-read* (subpath (param "RELEASE")))
+(allow file-read-metadata (path-ancestors (param "RELEASE")))
+
+; The system's libraries and dyld's cache, OpenSSL's configuration, the time zone.
+(allow file-read* file-map-executable (subpath "/usr/lib") (subpath "/System"))
+(allow file-read-data (literal "/"))
+(allow file-read-metadata (literal "/etc") (literal "/var"))
+(allow file-read* (literal "/private/etc/localtime") (subpath "/private/var/db/timezone"))
+(allow file-read* file-write-data (literal "/dev/null"))
+(allow sysctl-read)
+
+; Node looks at its output at start: a pipe passes, a log file must be in LOGS, or Node aborts.
+(allow file-read-metadata (subpath (param "LOGS")))
+
+; Listening on the web port, and the backend's: nothing else, no name lookups.
+(allow network-bind network-inbound (local ip (string-append "localhost:" (param "WEB_PORT"))))
+(allow network-outbound (remote ip (string-append "localhost:" (param "BACKEND_PORT"))))
+
+; Refused, and harmless: Node asks for these at start (the system's log, its notifications,
+; account lookups, and DNS settings for a resolver the web app never uses). Measured over the
+; whole end-to-end suite under this profile: nothing else was refused.
+(deny file-read* file-write* file-ioctl (literal "/dev/dtracehelper") (with no-log))
+(deny mach-lookup
+  (global-name "com.apple.system.notification_center" "com.apple.system.opendirectoryd.libinfo"
+    "com.apple.logd" "com.apple.SystemConfiguration.DNSConfiguration")
+  (with no-log))

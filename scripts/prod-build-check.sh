@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# The production build's checks (docs/specs/platform.md, criterion 7, apart from the web app's
-# launch flags, which T19 checks), in a scratch home, in production mode:
+# The production build's checks (docs/specs/platform.md, criterion 7, apart from what the web
+# app's launch flags deny, which scripts/test/web-launch.test.ts checks), in a scratch home, in
+# production mode:
 #   1. src/ imports nothing from test/: the backend's import graph, as TypeScript follows it,
 #      and the web build's own sources, as its server source maps list them;
 #   2. the web app builds, with no static page;
 #   3. the production guard refuses each case, each one change away from settings it accepts;
 #   4. the web build stops when started with another BACKEND_INTERNAL_URL, or none, even with
 #      INSTANTE_BUILT_BACKEND in its environment, since the build's address is fixed into it;
-#   5. the document service, the backend and the web app start as `instante start` starts them:
-#      /readyz answers, /api reaches the backend through the rewrite, no test route is served,
-#      the page's policy is production's, and selftest passes.
+#      and without NEXT_PRIVATE_OUTPUT_TRACE_ROOT, which keeps Next inside its read grant;
+#   5. the document service, the backend and the web app start as `instante start` starts them
+#      (scripts/prod-build/stack.sh, the web app under its sandbox profile on macOS): /readyz
+#      answers, /api reaches the backend through the rewrite, no test route and no end-to-end
+#      fixture page is served, the page's policy is production's, and selftest passes.
 #
 # Needs: the Node mise.toml pins on PATH, pnpm, the workspace installed, a Postgres 18 on
 # 127.0.0.1:5432 with scripts/dev-db.sh run (instante_test migrated), ports 4320 and 4321 free,
@@ -24,15 +27,12 @@ set -u -o pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
 cd "$root" || exit 2
-# start, run_for and ended_as: each process in a group of its own, stopped whole.
-# shellcheck source=scripts/prod-build/procs.sh
-. scripts/prod-build/procs.sh || exit 2
+# The stack as `instante start` starts it (ports, the pinned Node, the home, the web command),
+# and procs.sh's start, run_for and ended_as: each process in a group of its own, stopped whole.
+# shellcheck source=scripts/prod-build/stack.sh
+. scripts/prod-build/stack.sh || exit 2
 
-web_port=4320
-backend_port=4321
 other_url=http://127.0.0.1:4399
-allowed_host="localhost:$web_port"
-backend_url="http://127.0.0.1:$backend_port"
 
 die() {
   echo "prod-build-check: $*" >&2
@@ -56,67 +56,25 @@ for f in apps/web/.env apps/web/.env.local apps/web/.env.production apps/web/.en
   [ -e "$f" ] && die "$f exists, and next start would read it: run this from a clean checkout"
 done
 
-# The pinned Node, by its real path, as scripts/dev.sh finds it.
-pinned="$(sed -n 's/^node = "\([0-9.]*\)"$/\1/p' mise.toml)"
-if ! node="$(command -v node)" || ! node="$("$node" -p process.execPath)"; then
-  die "node isn't on PATH"
-fi
-if [ -z "$pinned" ] || [ "$("$node" --version)" != "v$pinned" ]; then
-  die "$node isn't Node $pinned, which mise.toml pins"
-fi
+stack_node || exit 2
+pinned="$("$node" --version)"
 wrong_node="${WRONG_NODE:-}"
 if [ -z "$wrong_node" ]; then
   [ "${CI:-}" = true ] && die "WRONG_NODE must name a Node other than the pinned one in CI"
-elif [ ! -x "$wrong_node" ] || [ "$("$wrong_node" --version)" = "v$pinned" ]; then
+elif [ ! -x "$wrong_node" ] || [ "$("$wrong_node" --version)" = "$pinned" ]; then
   die "WRONG_NODE must name a Node other than the pinned one, not $wrong_node"
 fi
 
-lsof=''
-for candidate in /usr/sbin/lsof /usr/bin/lsof; do
-  if [ -x "$candidate" ]; then
-    lsof="$candidate"
-    break
-  fi
-done
-[ -n "$lsof" ] || die "lsof isn't at /usr/sbin/lsof or /usr/bin/lsof"
-for port in "$web_port" "$backend_port"; do
-  [ -z "$("$lsof" -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null)" ] || die "port $port is in use"
-done
+stack_ports || exit 2
 
-# The scratch folder: tools/ for this script's files, logs/, and home/ as INSTANTE_HOME. Short,
-# since a socket's path is capped (104 bytes for Node's, 103 for Postgres's).
+# The scratch folder: tools/ for this script's files, logs/, and home/ as INSTANTE_HOME, short,
+# since a socket's path is capped. From procs_setup on, every exit stops what the check started
+# and removes the folder (procs.sh).
 work="$(mktemp -d "${TMPDIR:-/tmp}/ipb.XXXXXX")" || die "can't make a scratch folder"
 work="$(cd "$work" && pwd -P)" || die "can't enter $work"
-home="$work/home"
-socket="$home/run/documents.sock"
-db_socket="$home/run/.s.PGSQL.5432"
-if [ "${#db_socket}" -gt 103 ]; then
-  rm -rf "$work"
-  die "$db_socket is too long for a socket: set a shorter TMPDIR"
-fi
-
-# From here every exit stops what the check started and removes the folder (procs.sh).
 procs_setup "$work" || die "can't set up $work"
-(umask 077 && mkdir -p "$work/tools" "$home/run" "$home/secrets") || exit 2
-(umask 077 && printf 'postgresql://instante_app@/instante_test?host=%s\n' "$home/run" \
-  >"$home/secrets/app.url") || exit 2
-
-# The end of a started process's log, for a failure's message: cleanup removes logs/.
-said() {
-  printf '\n%s' "$(tail -n 20 "$work/logs/$1.log" 2>/dev/null)"
-}
-
-# Waits up to $2 seconds for the command after them to succeed, while process $1 runs.
-await() {
-  local pid="$1" deadline=$((SECONDS + $2))
-  shift 2
-  while [ "$SECONDS" -lt "$deadline" ]; do
-    kill -0 "$pid" 2>/dev/null || return 1
-    "$@" >/dev/null 2>&1 && return 0
-    sleep 0.2
-  done
-  return 1
-}
+stack_home production || exit 2
+(umask 077 && mkdir -p "$work/tools") || exit 2
 
 # 1a. The backend runs its source: every file its entry points reach, by any import TypeScript
 # follows (static, type-only, or import() of a literal), must be outside test/. A specifier
@@ -163,11 +121,6 @@ fi
 # checks, so a looser match could pass for the wrong reason. A case the guard wrongly accepted
 # would start, and be stopped, with whatever it started, at its 20-second deadline. Each case's
 # output goes to a file, not $(...), which would wait for every process holding it open.
-backend_env=(INSTANTE_ENV=production ROLE=all INSTANTE_HOME="$home" LISTEN_ADDRESS=127.0.0.1
-  PORT="$backend_port" ALLOWED_HOST="$allowed_host" DATABASE_URL_FILE="$home/secrets/app.url"
-  DOCUMENTS_SOCKET="$socket")
-documents_env=(INSTANTE_ENV=production ROLE=documents INSTANTE_HOME="$home"
-  DOCUMENTS_SOCKET="$socket")
 main="$root/apps/backend/src/main.ts"
 
 refuses() {
@@ -221,17 +174,8 @@ refuses "DOCUMENTS_SOCKET must be in $home/run in production" \
   env -i "${documents_env[@]}" DOCUMENTS_SOCKET="$work/documents.sock" \
   "$node" --disable-sigusr1 "$main"
 
-# 4. The web app, as `instante start` starts it (docs/specs/platform.md), with the read grant
-# on this checkout; T19 checks what the grant denies. It starts in apps/web, since Next resolves
-# next.config.ts's imports from its working folder.
-web() {
-  (cd "$root/apps/web" && exec env -i NEXT_TELEMETRY_DISABLED=1 \
-    NEXT_PRIVATE_OUTPUT_TRACE_ROOT="$root" ALLOWED_HOST="$allowed_host" "$@" \
-    "$node" --disable-sigusr1 --permission --allow-fs-read="$root" --allow-net \
-    --no-experimental-sqlite --freeze-flags-after-init \
-    "$root/apps/web/node_modules/next/dist/bin/next" start \
-    --experimental-next-config-strip-types -H 127.0.0.1 -p "$web_port")
-}
+# 4. The web app, as `instante start` starts it (stack.sh's web), with the read grant on this
+# checkout.
 # With INSTANTE_BUILT_BACKEND set to the address it's started with, a build that read the
 # address at run time would start; set in the `unset` case, the message would name 4399.
 mismatch() {
@@ -252,32 +196,32 @@ mismatch "$other_url" BACKEND_INTERNAL_URL="$other_url" INSTANTE_BUILT_BACKEND="
 mismatch unset
 mismatch unset INSTANTE_BUILT_BACKEND="$other_url"
 
+# The root variable is private to Next.js (platform spec, the web command): without it, Next
+# looks for a workspace root above the checkout, which the read grant refuses. A Next.js that
+# stops reading it fails here first.
+run_for 60 web BACKEND_INTERNAL_URL="$backend_url" NEXT_PRIVATE_OUTPUT_TRACE_ROOT= \
+  >"$work/logs/case.log" 2>&1
+status=$?
+if [ "$status" != 0 ] && [ "$status" != 124 ] && grep -q ERR_ACCESS_DENIED "$work/logs/case.log"; then
+  pass "without NEXT_PRIVATE_OUTPUT_TRACE_ROOT, the web app's start reads past its grant and stops"
+else
+  fail "without NEXT_PRIVATE_OUTPUT_TRACE_ROOT: $(ended_as "$status"): $(tail -n 20 "$work/logs/case.log")"
+fi
+
 # 5. The stack.
-start relay "$node" --disable-sigusr1 scripts/prod-build/pg-relay.ts "$db_socket"
-await "$last_pid" 10 test -S "$db_socket" || die "the database relay didn't start"
-
-start documents env -i "${documents_env[@]}" "$node" --disable-sigusr1 "$main"
-documents_pid=$last_pid
-await "$documents_pid" 30 curl -s -o /dev/null --max-time 2 --unix-socket "$socket" http://documents/ ||
-  fail "the document service didn't start:$(said documents)"
-
-start backend env -i "${backend_env[@]}" "$node" --disable-sigusr1 "$main"
-backend_pid=$last_pid
-if await "$backend_pid" 60 curl -fs -o /dev/null --max-time 6 "$backend_url/readyz"; then
+stack_relay || die "the database relay didn't start"
+stack_documents || fail "the document service didn't start:$(stack_said documents)"
+if stack_backend; then
   pass "the backend starts in production, and /readyz answers"
 else
-  fail "/readyz: $(curl -s --max-time 6 "$backend_url/readyz")$(said backend)"
+  fail "/readyz: $(curl -s --max-time 6 "$backend_url/readyz")$(stack_said backend)"
 fi
-
-start web web BACKEND_INTERNAL_URL="$backend_url"
-web_pid=$last_pid
-page() { curl -s --max-time 10 -H "Host: $allowed_host" "$@"; }
-web_ready() { [ "$(page -o /dev/null -w '%{http_code}' "http://127.0.0.1:$web_port/")" = 200 ]; }
-if await "$web_pid" 60 web_ready; then
+if stack_web BACKEND_INTERNAL_URL="$backend_url"; then
   pass "the web app starts with its own BACKEND_INTERNAL_URL"
 else
-  fail "the web app didn't start:$(said web)"
+  fail "the web app didn't start:$(stack_said web)"
 fi
+page() { stack_page "$@"; }
 if page -D - -o /dev/null "http://127.0.0.1:$web_port/api/ping" | tr -d '\r' |
   grep -qix 'cache-control: private, no-store'; then
   pass "/api reaches the backend through the rewrite"
@@ -290,6 +234,13 @@ case "$pdf" in
   401 | 404) pass "production serves no test route ($pdf for /api/test/file.pdf)" ;;
   *) fail "/api/test/file.pdf answered $pdf in production" ;;
 esac
+# The end-to-end build's fixture pages (next.config.ts) aren't pages in this build.
+fixture="$(page -o /dev/null -w '%{http_code}' "http://127.0.0.1:$web_port/e2e/shell-error")"
+if [ "$fixture" = 404 ]; then
+  pass "this build serves no end-to-end fixture page"
+else
+  fail "/e2e/shell-error, an end-to-end fixture page, answered $fixture"
+fi
 policy="$(page -o /dev/null -D - "http://127.0.0.1:$web_port/" | tr -d '\r' |
   sed -n 's/^[Cc]ontent-[Ss]ecurity-[Pp]olicy: //p')"
 case "; $policy;" in
