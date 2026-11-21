@@ -233,6 +233,8 @@ describe('scripts/dev.sh', () => {
       ),
     );
     expect(dev.output()).not.toContain('dev: open');
+    // Each group stops on its TERM, not after the 15 seconds' KILL.
+    expect(dev.output()).not.toContain("didn't stop in 15 seconds");
     expect(await eventually(() => !alive(web.pid))).toBe(true);
     expect(readdirSync(tmp)).toEqual([]);
   }, 30_000);

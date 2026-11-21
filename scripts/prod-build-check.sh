@@ -151,9 +151,9 @@ for address in 0.0.0.0 :: 192.0.2.1; do
     env -i "${backend_env[@]}" LISTEN_ADDRESS="$address" "$node" --disable-sigusr1 "$main"
 done
 if [ -n "$wrong_node" ]; then
-  refuses "production runs only on Node v$pinned" \
+  refuses "production runs only on Node $pinned" \
     env -i "${backend_env[@]}" "$wrong_node" --disable-sigusr1 "$main"
-  refuses "production runs only on Node v$pinned" \
+  refuses "production runs only on Node $pinned" \
     env -i "${documents_env[@]}" "$wrong_node" --disable-sigusr1 "$main"
 else
   skip "the wrong Node: WRONG_NODE isn't set (CI sets it)"

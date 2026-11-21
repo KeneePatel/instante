@@ -39,7 +39,10 @@ test.describe('on a phone, 375 px wide', () => {
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Inbox');
     await expectNoSeriousViolations(page);
     await page.getByRole('button', { name: 'Menu' }).click();
-    await expect(page.getByRole('dialog', { name: 'Instante' })).toBeVisible();
+    // The sheet fades in over 200 ms, and axe blends colours at the opacity it finds: halfway
+    // through, the links measure about 3.5:1. Judge the menu once it is opaque.
+    const menu = page.getByRole('dialog', { name: 'Instante' });
+    await expect(menu).toHaveCSS('opacity', '1');
     await expectNoSeriousViolations(page);
   });
 });
