@@ -3,7 +3,7 @@
 # scripts/ and the end-to-end tests, as CI runs them. osv-scanner and Semgrep run only in CI (the
 # owner's choice, 2026-11-20): neither is installed on the Mac, and CI runs Semgrep from its
 # image. The end-to-end tests need Postgres with scripts/dev-db.sh run, Chromium's headless
-# shell (`pnpm --filter @instante/web exec playwright install --only-shell chromium`), and ports
+# shell (`pnpm -C apps/web exec playwright install --only-shell chromium`), and ports
 # 4320 and 4321 free.
 # Exit codes: 0 every check passed, 1 one failed.
 set -u -o pipefail

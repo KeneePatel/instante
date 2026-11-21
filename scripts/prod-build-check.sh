@@ -101,7 +101,7 @@ fi
 
 # 2. The build, with the backend's address fixed into it.
 if ! BACKEND_INTERNAL_URL="$backend_url" NEXT_TELEMETRY_DISABLED=1 \
-  pnpm --filter @instante/web build >"$work/logs/build.log" 2>&1; then
+  pnpm -C apps/web build >"$work/logs/build.log" 2>&1; then
   cat "$work/logs/build.log" >&2
   echo "prod-build-check: the web build failed" >&2
   exit 1

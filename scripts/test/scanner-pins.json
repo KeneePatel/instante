@@ -12,7 +12,7 @@
         "shellcheck": "8f28521a869bbeb44f82d4379e0be498bb2402f4912c6f3379c940fe0ea81a4c",
         "osv-scanner": "390b0939908c36cf8e614ee647065da4f2544275416a4982cf9d00034728519c",
         "semgrep": "d7d065eb2cd29bed51c29912257999d2ccefea2669306fca38bcec6099ae4d16",
-        "e2e": "1b3ce8eda5f9cdd2292ccf3e6f94aa634efef920bf5e15c92a538b8cac47d83a"
+        "e2e": "b8e98582948176c571d575fe5b1476c49b497415183f8610bb9093ee1b1c218f"
       }
     },
     ".github/workflows/osv-weekly.yml": {
@@ -32,8 +32,8 @@
     "scripts/ci/semgrep-canary.sh": "1ffaaccb8bdcac610f13b27a4b5c008cd6204cd8b210d11e640d62fdf04c6c0b",
     "scripts/ci/floor-guard-base.sh": "e150016597af4bf77ed19bfb5a690f8f565c94b39dccd14dacb784547036cb53",
     "scripts/check-osv.ts": "cb0c2481d587d8a9dee00c808a3a7224327e2a1dc341338343e9973d88ab1632",
-    "apps/web/playwright.config.ts": "81ac47a1bba05de2bd69919d5618ac1de4a98090d8982f1d4c6e07244052a112",
-    "scripts/e2e-stack.sh": "189afdeee55a27db3bbf3232c69cc5606eaa0ea546debc68e602dd382e473382"
+    "apps/web/playwright.config.ts": "2277015234b94902aefce6216ac24ae46026efc0df6c3d6e6553b51faa3e3f36",
+    "scripts/e2e-stack.sh": "7eb8162de223e14327c446058ee40381be1faaf2180bcdb144267f612c229016"
   },
   "commands": {
     "format:check": "prettier --check .",
@@ -43,7 +43,7 @@
     "floor-guard": "node scripts/floor-guard.ts",
     "check:commits": "node scripts/check-commits.ts",
     "check:agent-settings": "node scripts/check-agent-settings.ts",
-    "test:e2e": "pnpm --filter @instante/web exec playwright test"
+    "test:e2e": "pnpm -C apps/web exec playwright test"
   },
   "arguments": {
     "semgrep": [

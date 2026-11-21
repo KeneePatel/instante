@@ -190,7 +190,7 @@ jobs:
           PGUSER: postgres
         run: bash scripts/dev-db.sh
       - name: Chromium's headless shell, with its libraries
-        run: pnpm --filter @instante/web exec playwright install --with-deps --only-shell chromium
+        run: pnpm -C apps/web exec playwright install --with-deps --only-shell chromium
       - name: The end-to-end tests
         run: pnpm test:e2e
 

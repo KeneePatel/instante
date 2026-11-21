@@ -20,7 +20,7 @@ export default defineConfig({
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
-    command: 'bash ../../scripts/e2e-stack.sh',
+    command: 'exec bash ../../scripts/e2e-stack.sh',
     url: 'http://127.0.0.1:4321/readyz',
     // The build, then four processes.
     timeout: 300_000,

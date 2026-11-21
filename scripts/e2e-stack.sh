@@ -11,7 +11,11 @@
 # It then runs until Playwright stops it (TERM), until one of them ends, or until the process
 # that started it has gone (a runner killed, or its terminal closed, which runs none of
 # Playwright's own teardown), and stops them all and removes its folder each way (procs.sh).
-# Playwright's shell execs this script, so that process is the runner itself; the log names it.
+# Playwright's command execs this script (Ubuntu's sh, dash, would otherwise fork it), so that
+# process is the runner itself; the log names it. Alone, nothing reads its output, and a write
+# would end it on SIGPIPE before its EXIT trap removes the folder: it ignores SIGPIPE, and checks
+# for the runner after the build, after each start and every second after, going quiet once it's
+# gone. A build under way runs to its end first.
 #
 # The checkout may hold apps/web/.env.local for `pnpm dev`, which `next build` and `next start`
 # would apply for any name their environment lacks; __NEXT_PROCESSED_ENV, a private name of
@@ -34,8 +38,15 @@ stop() {
   exit 1
 }
 
+trap '' PIPE
 parent=$PPID
 say "started by process $parent ($(ps -o comm= -p "$parent" 2>/dev/null))"
+# Exits, quietly, once the process that started it has gone; the EXIT trap stops the rest.
+unless_alone() {
+  kill -0 "$parent" 2>/dev/null && return 0
+  exec >/dev/null 2>&1
+  exit 1
+}
 stack_node || exit 2
 stack_ports || exit 2
 work="$(mktemp -d "${TMPDIR:-/tmp}/ie2e.XXXXXX")" || exit 2
@@ -45,31 +56,31 @@ stack_home test || exit 2
 
 say "building the web app with its fixture pages"
 if ! INSTANTE_E2E_PAGES=1 BACKEND_INTERNAL_URL="$backend_url" __NEXT_PROCESSED_ENV=true \
-  NEXT_TELEMETRY_DISABLED=1 pnpm --filter @instante/web build >"$work/logs/build.log" 2>&1; then
+  NEXT_TELEMETRY_DISABLED=1 pnpm -C apps/web build >"$work/logs/build.log" 2>&1; then
   cat "$work/logs/build.log" >&2
   stop "the web build failed"
 fi
 
+unless_alone
 stack_relay || stop "the database relay didn't start"
 relay_pid=$last_pid
+unless_alone
 stack_documents || stop "the document service didn't start:$(stack_said documents)"
 documents_pid=$last_pid
+unless_alone
 stack_web BACKEND_INTERNAL_URL="$backend_url" __NEXT_PROCESSED_ENV=true ||
   stop "the web app didn't start:$(stack_said web)"
+unless_alone
 stack_backend || stop "the backend didn't start:$(stack_said backend)"
 backend_pid=$last_pid
+unless_alone
 say "ready: the web app at http://localhost:$web_port, the backend at $backend_url"
 
-# Once the process that started it has gone, nothing reads its output (a write would end it on
-# SIGPIPE), so it says nothing more and exits; the EXIT trap stops the rest.
 while :; do
   for pid in "$relay_pid" "$documents_pid" "$web_pid" "$backend_pid"; do
     kill -0 "$pid" 2>/dev/null || break 2
   done
-  if ! kill -0 "$parent" 2>/dev/null; then
-    exec >/dev/null 2>&1
-    exit 1
-  fi
+  unless_alone
   sleep 1
 done
 for name in relay documents web backend; do

@@ -27,9 +27,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 // Pinned: each workflow's top-level settings and each checking job, by hash once comment lines
 // and the version each action is pinned at are dropped (so Dependabot's bumps pass, and any
 // other change to a checking job, a step added or a key respelled, doesn't); no other job
-// answering to a checking job's name; the scanners' scripts and check-osv.ts, by hash; the
-// package.json commands CI calls; each scanner's exact arguments and exit codes; ShellCheck's
-// choice of files; and CONSTRAINTS.md's CVSS bar against check-osv.ts.
+// answering to a checking job's name; the scanners' scripts, check-osv.ts, Playwright's config
+// and scripts/e2e-stack.sh, by hash; the root package.json commands CI calls, the end-to-end
+// run's among them; each scanner's exact arguments and exit codes; ShellCheck's choice of files;
+// and CONSTRAINTS.md's CVSS bar against check-osv.ts.
 
 const REPO = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const BASH = '/bin/bash';

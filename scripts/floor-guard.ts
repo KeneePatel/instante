@@ -81,9 +81,11 @@ interface Diff {
   removed: Line[];
   deleted: string[];
   newFiles: string[];
+  renamed: { from: string; to: string }[];
 }
 function walk(text: string): Diff {
-  const diff: Diff = { added: [], removed: [], deleted: [], newFiles: [] };
+  const diff: Diff = { added: [], removed: [], deleted: [], newFiles: [], renamed: [] };
+  let renameFrom = '';
   const pathOf = (s: string): string => s.replace(/^[ab]\//, '');
   // An empty new file has no ---/+++ lines, only `diff --git a/P b/P` and `new file mode`.
   const samePath = (s: string): string => {
@@ -108,8 +110,12 @@ function walk(text: string): Diff {
       // A file renamed or copied into place is new where it lands, though an exact rename has
       // no ---/+++ lines and no content.
       if (line.startsWith('new file mode')) addNew(headerPath);
-      else if (line.startsWith('rename to ')) addNew(line.slice('rename to '.length));
-      else if (line.startsWith('copy to ')) addNew(line.slice('copy to '.length));
+      else if (line.startsWith('rename from ')) renameFrom = line.slice('rename from '.length);
+      else if (line.startsWith('rename to ')) {
+        const to = line.slice('rename to '.length);
+        addNew(to);
+        diff.renamed.push({ from: renameFrom, to });
+      } else if (line.startsWith('copy to ')) addNew(line.slice('copy to '.length));
       else if (line.startsWith('--- ')) oldFile = pathOf(line.slice(4));
       else if (line.startsWith('+++ ')) {
         const newFile = pathOf(line.slice(4));
@@ -126,7 +132,7 @@ function walk(text: string): Diff {
   }
   return diff;
 }
-const { added, removed, deleted, newFiles } = walk(`${tracked}\n${untracked}`);
+const { added, removed, deleted, newFiles, renamed } = walk(`${tracked}\n${untracked}`);
 
 // The checks' pins (rule 10): their data, and the test that reads it.
 const PINS = 'scripts/test/scanner-pins.test.ts';
@@ -197,7 +203,9 @@ for (const commit of commits.split('\n').filter(Boolean)) {
   for (const [, where, why] of named) {
     if (where === undefined || why === undefined) continue;
     reasons.set(where, why.trim());
-    if (changes.deleted.includes(where)) vouchedDeletes.add(where);
+    if (changes.deleted.includes(where) || changes.renamed.some((r) => r.from === where)) {
+      vouchedDeletes.add(where);
+    }
     const putBack = new Map<string, number>();
     for (const l of changes.added) {
       putBack.set(lineKey(l.file, l.text), (putBack.get(lineKey(l.file, l.text)) ?? 0) + 1);
@@ -265,18 +273,32 @@ const STUBS: RegExp[] = [
 ];
 // 3. A test made easier.
 const SKIPS: RegExp[] = [
-  /\.(ski[p]|onl[y]|tod[o]|skipI[f]|runI[f])\(/,
+  /\.(ski[p]|onl[y]|tod[o]|skipI[f]|runI[f]|fail[s])\(/,
   /\b(xi[t]|xdescrib[e]|xtes[t])\(/,
-  // Playwright's: a test marked to be fixed, or expected to fail, on test or on its TestInfo (not
-  // pg-boss's boss.fail()).
-  /\b(test(\.describe)?|testInfo|test\.info\(\))\.(fixm[e]|fai[l])\(/,
+  // Playwright's test marked to be fixed, on test or a TestInfo by any name.
+  /\.fixm[e]\(/,
+  // ... or expected to fail, on test (not pg-boss's boss.fail() or assert.fail()).
+  /\b(test(\.describe)?|testInfo|test\.info\(\))\.fai[l]\(/,
   // A run that finds no test file passes: Vitest's spelling and Playwright's.
   /passWithNoTest[s]|pass-with-no-test[s]/,
 ];
-// A failure retried until it passes, in a test file or a runner's config: any count but a plain 0.
-const RETRIES = /\bretr(y|ie[s])\s*:(?!\s*0\b)/;
+// In a test file: a test's details that skip it or expect it to fail, and Vitest's options that
+// do. In a Playwright spec, which has no pg-boss, a TestInfo's fail() by any name.
+const SKIPS_IN_TESTS: RegExp[] = [
+  /\btype\s*:\s*['"](ski[p]|fixm[e]|fai[l])['"]/,
+  /\b(ski[p]|tod[o]|fail[s]|onl[y])\s*:\s*true\b/,
+];
+const PLAYWRIGHT_SPEC = /^apps\/web\/e2e\/.*\.spec\.[cm]?[jt]sx?$/;
+// A failure retried until it passes, in a test, its helpers or a runner's config: a retry count
+// other than a plain 0 (or a callback by that name, as a test of an error screen passes), or the
+// key alone.
+const RETRIES: RegExp[] = [
+  /\bretr(y|ie[s])\s*:(?!\s*(0\s*([,})]|\/\/|$)|false\b|vi\.fn\(|\(|async\b|function\b))/,
+  /[{,]\s*retr(y|ie[s])\s*[,}]/,
+];
 const isRunnerConfig = (f: string): boolean =>
   /(^|\/)(vitest|playwright)\.config\.[cm]?ts$/.test(f);
+const inTestTree = (f: string): boolean => isTest(f) || /(^|\/)(e2e|test)\//.test(f);
 
 // 4. The web app's bans (ADR-005), and the auth rule (ADR-004).
 const WEB_BANS: RegExp[] = [
@@ -307,7 +329,14 @@ for (const { file: f, text } of added) {
     for (const p of SUPPRESSIONS) if (p.test(text)) flag('silenced-checker', f, text);
     for (const p of STUBS) if (p.test(text)) flag('unfinished-work', f, text);
     for (const p of SKIPS) if (p.test(text)) flag('test-made-easier', f, text);
-    if ((isTest(f) || isRunnerConfig(f)) && RETRIES.test(text)) flag('test-made-easier', f, text);
+    if (isTest(f))
+      for (const p of SKIPS_IN_TESTS) if (p.test(text)) flag('test-made-easier', f, text);
+    if (PLAYWRIGHT_SPEC.test(f) && /\.fai[l]\(/.test(text) && !/\bassert\.fai[l]\(/.test(text)) {
+      flag('test-made-easier', f, text);
+    }
+    if (inTestTree(f) || isRunnerConfig(f)) {
+      for (const p of RETRIES) if (p.test(text)) flag('test-made-easier', f, text);
+    }
   } else if (
     /(^|\/)package\.json$/.test(f) &&
     /passWithNoTest[s]|pass-with-no-test[s]/.test(text)
@@ -342,8 +371,14 @@ for (const f of ['apps/web/next.config.ts', 'apps/web/next.config.mjs']) {
 
 // 6. Tests deleted, or assertions removed from a test that stays (moved lines don't count),
 // unless the commit that removed them says why.
+// A test renamed into another folder, or to a name no runner takes as a test, has left the run
+// as surely as one deleted.
+const folderOf = (f: string): string => f.slice(0, f.lastIndexOf('/') + 1);
+const leftTheRun = renamed
+  .filter((r) => isTest(r.from) && (!isTest(r.to) || folderOf(r.from) !== folderOf(r.to)))
+  .map((r) => r.from);
 const reasoned = new Set<string>();
-for (const f of deleted) {
+for (const f of [...deleted, ...leftTheRun]) {
   if (!isTest(f)) continue;
   if (vouchedDeletes.has(f)) reasoned.add(f);
   else flag('test-deleted', f, 'file deleted');
@@ -586,7 +621,7 @@ if (dataAtBase !== null && !existsSync(PINS_DATA)) {
   flag('pin-removed', PINS_DATA, 'the checks’ pins are gone');
 }
 if (pinsAtBase && existsSync(PINS)) {
-  for (const [k, n] of unmoved({ added, removed, deleted, newFiles }, PINS)) {
+  for (const [k, n] of unmoved({ added, removed, deleted, newFiles, renamed }, PINS)) {
     for (let i = 0; i < n; i += 1) {
       const left = vouchedPinLines.get(k) ?? 0;
       if (left > 0) {

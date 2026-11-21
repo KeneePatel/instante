@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit -p . && pnpm -r typecheck",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "pnpm --filter @instante/web exec playwright test",
+    "test:e2e": "pnpm -C apps/web exec playwright test",
     "floor-guard": "node scripts/floor-guard.ts",
     "check:commits": "node scripts/check-commits.ts",
     "check:agent-settings": "node scripts/check-agent-settings.ts",

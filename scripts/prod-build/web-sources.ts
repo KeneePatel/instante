@@ -6,7 +6,7 @@
 //
 // A source is a URL-encoded path relative to its map; this resolves each one, keeps those inside
 // the repository and outside node_modules, and fails on any in a test or e2e folder, or named
-// *.test.ts(x). It also fails unless the maps list files every build has (instrumentation.ts,
+// *.test.ts(x) or *.e2e.ts(x) (an end-to-end fixture page, wherever it sits). It also fails unless the maps list files every build has (instrumentation.ts,
 // proxy.ts, the root layout), so a Next.js that stops writing them can't pass by listing nothing.
 // Exit codes: 0 nothing from a test folder, 1 something, or the maps missing those files, 2 no
 // build to read.
@@ -16,7 +16,7 @@ import path from 'node:path';
 const root = path.resolve(process.argv[2] ?? '.');
 const server = path.join(root, 'apps/web/.next/server');
 const EVERY_BUILD = ['apps/web/instrumentation.ts', 'apps/web/proxy.ts', 'apps/web/app/layout.tsx'];
-const FROM_TEST = /(^|\/)(test|e2e)\/|\.test\.tsx?$/;
+const FROM_TEST = /(^|\/)(test|e2e)\/|\.(test|e2e)\.tsx?$/;
 
 let entries: string[];
 try {

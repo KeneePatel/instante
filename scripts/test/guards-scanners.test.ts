@@ -128,11 +128,38 @@ describe('floor-guard', () => {
     expect(repo.run(guard)).toMatchObject({ status: 0 });
   });
 
-  it('leaves retries in application code, and none in a runner’s config, alone', () => {
+  it('leaves retries in application code, none in a runner’s config, and a retry callback alone', () => {
     const repo = makeRepo();
     repo.write('apps/backend/src/fetch.ts', k('export const options = { retri', 'es: 3 };\n'));
-    repo.write('apps/web/playwright.config.ts', k('export default { retri', 'es: 0 };\n'));
+    repo.write('apps/web/playwright.config.ts', k('export default { retri', 'es: 0 }; // none\n'));
+    repo.write(
+      'apps/web/e2e/b.spec.ts',
+      k('const props = { error, retr', 'y: vi.fn() };\nassert.fa', "il('no');\n"),
+    );
     expect(repo.run(guard)).toMatchObject({ status: 0 });
+  });
+
+  // A test renamed out of the run is gone from it; one renamed beside itself still runs.
+  it('flags a test renamed to another folder or to a name no runner takes, unless a commit says why', () => {
+    const spec = "test('a', async () => {\n  expect(1).toBe(1);\n});\n";
+    const files = { 'apps/web/e2e/a.spec.ts': spec, 'apps/web/e2e/b.spec.ts': spec };
+    const moved = makeRepo(files);
+    moved.git(['mv', 'apps/web/e2e/a.spec.ts', 'apps/web/a.spec.ts']);
+    moved.git(['mv', 'apps/web/e2e/b.spec.ts', 'apps/web/e2e/b.ts']);
+    moved.commit('Move them');
+    const { output } = moved.run(guard);
+    expect(output).toContain('[test-deleted] apps/web/e2e/a.spec.ts');
+    expect(output).toContain('[test-deleted] apps/web/e2e/b.spec.ts');
+
+    const beside = makeRepo(files);
+    beside.git(['mv', 'apps/web/e2e/a.spec.ts', 'apps/web/e2e/c.spec.ts']);
+    beside.commit('Rename it');
+    expect(beside.run(guard)).toMatchObject({ status: 0 });
+
+    const vouched = makeRepo(files);
+    vouched.git(['mv', 'apps/web/e2e/a.spec.ts', 'apps/web/a.spec.ts']);
+    vouched.commit('Move it\n\nTests removed from apps/web/e2e/a.spec.ts: replaced by a unit test');
+    expect(vouched.run(guard)).toMatchObject({ status: 0 });
   });
 
   // A commit that moves an assertion within its file vouches for nothing a later one removes.
@@ -165,6 +192,35 @@ describe('floor-guard', () => {
     ],
     ['test-made-easier', 'apps/web/playwright.config.ts', k('  retri', 'es: 1,\n')],
     ['test-made-easier', 'src/a.test.ts', k("it('a', { retr", 'y: 3 }, () => {});\n')],
+    ['test-made-easier', 'apps/web/e2e/a.spec.ts', k('  info.fix', 'me();\n')],
+    ['test-made-easier', 'apps/web/e2e/a.spec.ts', k('  info.fa', 'il();\n')],
+    [
+      'test-made-easier',
+      'apps/web/e2e/a.spec.ts',
+      k("test('a', { annotation: { type: 'sk", "ip' } }, async () => {});\n"),
+    ],
+    ['test-made-easier', 'src/a.test.ts', k("it('a', { sk", 'ip: true }, () => {});\n')],
+    ['test-made-easier', 'src/a.test.ts', k('it.fa', "ils('a', () => {});\n")],
+    [
+      'test-made-easier',
+      'apps/web/e2e/a.spec.ts',
+      k('test.describe.configure({ retri', 'es: 0.5 });\n'),
+    ],
+    [
+      'test-made-easier',
+      'apps/web/e2e/a.spec.ts',
+      k('test.describe.configure({ retri', 'es: 0 || 2 });\n'),
+    ],
+    [
+      'test-made-easier',
+      'apps/web/e2e/a.spec.ts',
+      k('test.describe.configure({ retri', 'es });\n'),
+    ],
+    [
+      'test-made-easier',
+      'apps/web/e2e/support/slow.ts',
+      k('export const slow = () => test.describe.configure({ retri', 'es: 2 });\n'),
+    ],
     [
       'test-made-easier',
       'package.json',

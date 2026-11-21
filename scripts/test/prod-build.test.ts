@@ -60,6 +60,7 @@ describe('web-sources', () => {
     ['an e2e folder', 'apps/web/e2e/skeleton.spec.ts'],
     ['a test file', 'apps/web/lib/api.test.ts'],
     ['a tsx test file', 'apps/web/components/screen.test.tsx'],
+    ['a fixture page outside an e2e folder', 'apps/web/app/(shell)/oops/page.e2e.tsx'],
     ['a path with spaces', 'apps/web/test/a b.ts'],
   ])('fails on a source in %s, naming it', (_case, file) => {
     const root = build({
