@@ -267,6 +267,8 @@ const STUBS: RegExp[] = [
 const SKIPS: RegExp[] = [
   /\.(ski[p]|onl[y]|tod[o]|skipI[f]|runI[f])\(/,
   /\b(xi[t]|xdescrib[e]|xtes[t])\(/,
+  // Playwright's: a test marked to be fixed, or expected to fail (not pg-boss's boss.fail()).
+  /\btest(\.describe)?\.(fixm[e]|fai[l])\(/,
   // A run that finds no test file passes.
   /passWithNoTest[s]/,
 ];
