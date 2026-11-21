@@ -54,6 +54,8 @@ for (const page of PAGES) {
       expect(scripts.length).toBeGreaterThan(0);
       expect(scripts.filter((tag) => !tag.includes(` nonce="${nonce ?? ''}"`))).toEqual([]);
       await expect(tab.getByRole('heading', { level: 1 })).toHaveText(page.heading);
+      if (page.title !== undefined) await expect(tab).toHaveTitle(page.title);
+      await expect(tab.getByRole('navigation', { name: 'Main' })).toHaveCount(page.shell ? 1 : 0);
       expect(await watched.violations()).toEqual([]);
       expect(unexpected(watched.consoleErrors, page.logs)).toEqual([]);
       await tab.close();

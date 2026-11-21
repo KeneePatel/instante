@@ -2,14 +2,13 @@ import { AxeBuilder } from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { PAGES } from './support/pages';
 
-// Accessibility (CONSTRAINTS.md: axe with WCAG 2 A, AA and 2.1 AA, nothing critical or serious)
-// on every page once hydrated, the error screens included, on a desktop and on a phone, with the
-// phone's menu open.
+// Accessibility (CONSTRAINTS.md: zero critical or serious axe findings, every page): axe's own
+// default rules, its WCAG ones and its best practices, on every page once hydrated, the error
+// screens included, on a desktop and on a phone, with the phone's menu open. axe leaves its
+// 24 px target-size rule off by default; shell.spec.ts measures the 44 px targets instead.
 
 async function expectNoSeriousViolations(page: Page): Promise<void> {
-  const { violations } = await new AxeBuilder({ page })
-    .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
-    .analyze();
+  const { violations } = await new AxeBuilder({ page }).analyze();
   const serious = violations
     .filter((v) => v.impact === 'critical' || v.impact === 'serious')
     .map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`);

@@ -67,8 +67,33 @@ test.describe('on a phone, 375 px wide', () => {
   });
 });
 
-// Held sideways, the side nav shows, and its links are still 44 px tall: axe's target-size rule
-// checks 24 px, so it can't stand in for this.
+// The other screens' targets, on a phone held either way: the error screen's two, the not-found
+// page's link, and the ping page's download link (axe's target-size rule, off by default, would
+// check only 24 px).
+for (const [held, viewport] of [
+  ['upright, 375 by 812', { width: 375, height: 812 }],
+  ['sideways, 844 by 390', { width: 844, height: 390 }],
+] as const) {
+  test.describe(`on a phone held ${held}`, () => {
+    test.use({ viewport, hasTouch: true });
+
+    test('the error, not-found and ping pages’ targets are 44 px', async ({ page }) => {
+      await page.goto('/e2e/shell-error');
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText('Something went wrong');
+      await expectTouchSize(page.getByRole('button', { name: 'Try again' }));
+      await expectTouchSize(page.getByRole('link', { name: 'Go to Inbox' }));
+      await page.goto('/no-such-page');
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText('Page not found');
+      await expectTouchSize(page.getByRole('link', { name: 'Go to Inbox' }));
+      await page.goto('/ping');
+      const download = page.getByRole('link', { name: 'Download the PDF' });
+      await expect(download).toBeVisible();
+      await expectTouchSize(download);
+    });
+  });
+}
+
+// Held sideways, the side nav shows, and its links are still 44 px tall.
 test.describe('on a phone held sideways, 844 by 390', () => {
   test.use({ viewport: { width: 844, height: 390 }, hasTouch: true });
 
