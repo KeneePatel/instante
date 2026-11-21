@@ -417,7 +417,7 @@
     - checked: `next build` inside a macOS sandbox that denies every outbound connection but loopback succeeds, and `check-no-static` passes (the same sandbox refuses `curl https://fonts.googleapis.com`, which succeeds outside it). In headless Chrome on the built server, Chrome draws Latin, Latin Extended (`łŁőŐ`), Cyrillic (`ЖжЯя`) and Vietnamese (`ạẠươ`) samples with the committed Geist, and the same with Geist Mono, through `--font-geist-mono`; the only font requests are the two files, from the app itself, and there's no CSP violation.
   - **Review (fixed):** one reviewer and a skeptic. The one finding held, low: the As built said the file drawn was the same as Google's, which it isn't literally (whole files, not subsets, and Geist Mono 1.700 against 1.701); it now says so. The reviewer found the rest as described: the bytes match the tag, served copies included; the licence's conditions are met (the licence beside the fonts and in each file's metadata, no reserved name, nothing modified or sold); the offline build; identical boxes, line heights and text widths against `main`'s build at 1280 and 375 px, and the fallback's vertical metrics unchanged; and the preloads carry the nonce.
 
-- [ ] **T18: CI's scanners and the production build**
+- [x] **T18: CI's scanners and the production build**
   - **Does:** in `ci.yml`, unless said otherwise:
     - osv-scanner on every run, and weekly in `osv-weekly.yml`;
     - Semgrep with `--baseline-commit`;
@@ -502,8 +502,8 @@
     - `check:full`;
     - `check:task` timed.
   - **Acceptance:** the end-to-end tests pass in CI (platform spec 8), the web app's launch flags deny reading a secret (the rest of spec 7), and `check:task` runs in under 90 seconds (the rest of spec 2).
-  - **Verify:** `pnpm --filter @instante/web test:e2e`; `time pnpm check:task`; the pull request's checks.
-  - **Depends on:** T17b, T18. **Files:** `apps/web/playwright.config.ts`, `apps/web/e2e/{skeleton,request-checks,a11y}.spec.ts`, `.github/workflows/ci.yml`. **Size:** M.
+  - **Verify:** `pnpm test:e2e`; `time pnpm check:task`; the pull request's checks.
+  - **Depends on:** T17b, T18. **Files:** `apps/web/playwright.config.ts`, `apps/web/e2e/{skeleton,shell,errors,request-checks,a11y}.spec.ts`, `apps/web/e2e/support/{pages,watch}.ts`, the fixture pages `apps/web/app/{(shell)/e2e/{shell-error,not-found,browser-error,metadata-error,recover},e2e/root-error}/page.e2e.tsx`, `scripts/e2e-stack.sh`, `scripts/check-full.sh`, `scripts/prod-build/{stack.sh,web.sb,read-probe.ts}`, `scripts/test/web-launch.test.ts`, the split test files `scripts/test/{dev-stop,guards-scanners,guards-commits,procs-run,procs-stop}.test.ts` and `scripts/test/support/{dev-harness,guard-repo,procs-harness}.ts`, plus edits to `.github/workflows/ci.yml`, `apps/web/{next.config.ts,next.config.test.ts,package.json}`, `package.json`, `pnpm-lock.yaml`, `scripts/prod-build-check.sh`, `scripts/floor-guard.ts`, `scripts/test/scanner-pins.json` and the test files split (with `scripts/test/support/procs-harness.ts`'s stdin). **Size:** L, kept as one task (the owner's choice, 2026-11-20).
   - **Notes from T17a:**
     - "every page" includes an unknown address and the error pages: `notFound()` and thrown errors are drawn by React in the browser, after an empty `__next_error__` page, so the CSP and axe checks must run after hydration in a real browser, which `curl` can't stand in for. T17a checked them from a scratch worktree with throwing pages; the tests need a way to reach those screens that the app itself doesn't ship;
     - `/` must show the shell's navigation and the Inbox heading: a leftover page at `/` builds and serves with no error;
@@ -518,9 +518,42 @@
     - `next start` reads `apps/web/.env*` for every name its environment lacks, and the owner's checkout has an `apps/web/.env.local`: start the webServer with `env -i`, or refuse while such a file exists, as `scripts/prod-build-check.sh` does;
     - `scripts/prod-build-check.sh` uses ports 4320 and 4321 too; it refuses them when they're in use, so it and the end-to-end tests can't run at once on one machine;
     - the web app under `--permission` started on CI's Linux runner in T18's production-build job, so the launch flags work there.
+  - **As built:**
+    - a four-reader study first (Playwright and CI, the sandbox profile, the tests, `check:full` and `check:task`) and a critic. The owner chose on 2026-11-20:
+      - **Chromium's headless shell from Playwright's own installer,** which checks only the size, not a hash: the threat model lists it with the CI tools no SHA-256 here pins;
+      - **osv-scanner and Semgrep in CI only:** `check:full` runs `check:task`, ShellCheck and the end-to-end tests, and says so;
+      - **one task, with a shared start-up script,** which changes the production-build gate;
+      - **the 90 seconds judged in CI too,** by splitting the slowest test files so Vitest runs them side by side;
+      - the owner declined a second round of questions, so the recommended choice stands for each, and the owner may overturn any: fixture pages in an e2e build for the error screens; Next's own `__NEXT_PROCESSED_ENV` for a checkout's `.env.local`, with a test; the profile's remaining leaks (whether a path exists, sysctl values) recorded in R2 rather than closed; the profile always applied on macOS;
+    - decided here: Playwright 1.65.0 and `@axe-core/playwright` 4.14.0, the approved lines, since 1.65.0's browser (Chrome for Testing 158) was 14 days old and 1.65.1's wasn't; the headless shell, as T17a's note says (assert the PDF's blob URL, media type and saved bytes, not its rendering); the backend in test mode, as the platform spec says, so the test routes serve the PDF and the slow route; the new job blocking from its first run, as T18 decided; `global-error.tsx` left to T17a's manual check, since only an error in the root layout itself reaches it;
+    - **the shared start-up** (`scripts/prod-build/stack.sh`, sourced by `prod-build-check.sh` and `e2e-stack.sh`, and the commands T22's launcher runs): the pinned Node by its real path, the ports, the scratch home, each process's `env -i` names, and the web app's launch command. `prod-build-check.sh` now also starts the web app without `NEXT_PRIVATE_OUTPUT_TRACE_ROOT` and expects it to stop on the permission model, which shows the spec's claim: without it, Next looks for a workspace root above the checkout (`../pnpm-workspace.yaml`), in a plain checkout as in a worktree;
+    - **the profile** (`scripts/prod-build/web.sb`, 46 lines, about 17 rules, hand-written from the study's measured draft): reads in the release, Node, `/usr/lib`, `/System`, the time zone and `/dev/null`; listening on the web port and reaching the backend's; no other port, process or signal (what stays open is in R2). Measured over the whole end-to-end suite under it: Node was refused only DTrace's helper device, the system's log, notifications, account lookups and DNS settings, at start, all harmless and now silent. Node aborts at start (exit 134) when its output is a file the profile doesn't name, so `stack.sh` gives it the logs folder; a pipe needs nothing;
+    - **the launch tests** (`scripts/test/web-launch.test.ts`, in `check:task`): a probe (`scripts/prod-build/read-probe.ts`) runs in Next's place under the same launch. A secret planted outside the checkout is refused straight by Node's flags everywhere, and through the checkout's own pnpm link by the profile on macOS (EPERM); on Linux, with no profile, that read goes through, which R2 records. Controls show the path does reach the secret, and the probe reads inside the checkout. Another test shows `__NEXT_PROCESSED_ENV` still keeps an env file from being applied;
+    - **the end-to-end stack** (`scripts/e2e-stack.sh`, Playwright's `webServer`): the web build with its fixture pages, then the relay, the document service, the web app and the backend, last, so `/readyz` answers only once the web app does; stopped by TERM, so `procs.sh` stops everything and removes its folder, and stopping itself the same way once the process that started it has gone (Playwright's runner killed outright runs none of its teardown; checked with a `kill -9` of the runner: within 4 seconds no listener, folder or script was left). `INSTANTE_E2E_REUSE=1` reuses a stack started by hand, for writing tests;
+    - **the fixture pages:** `page.e2e.tsx` files under `e2e/` folders, pages only when `INSTANTE_E2E_PAGES=1` adds `e2e.tsx` to `pageExtensions` (a spike confirmed Turbopack honours it). `next.config.test.ts` shows any other build keeps Next's own extensions, `prod-build-check.sh` gets a 404 for one in its own build, and `web-sources.ts` fails a build holding one, which T21's release runs on its build;
+    - **the tests** (43, in five spec files): the ping page from the server and the browser; the sample PDF's blob URL, its route's media type and the bytes its link saves; `/` showing the shell and the Inbox; no static page in the build served; on every page, the server's scripts all carrying a fresh nonce and no policy violation (scripts Next adds later carry none and need none, under `'strict-dynamic'`), its title and whether the shell is around it; the Host refusal on a page, a prefetch, `/api` and the backend; Fetch Metadata's 403 except a top-level navigation to a page; the slow route's message after 30 seconds; the phone menu (44 px targets, its name, focus in and back, closed by Escape, a link, Back, Forward and widening); 44 px side-nav links on a phone held sideways, and the error screen's, not-found page's and ping page's targets on a phone held either way; the route announcer; each error screen, with or without the shell, its reference and its links; "Try again" bringing the Inbox back (the shell made to fail in the browser) and a page whose server error has gone; axe's default rules (its WCAG ones and its best practices, as CONSTRAINTS.md names no narrower set) on every page, the browser error's screen, and a phone with the menu open. Three runs in a row passed;
+    - **CI:** the `e2e` job, a checking job pinned like the others, its command a root script (`pnpm test:e2e`) and Playwright's config and `e2e-stack.sh` pinned by hash like the scanners' scripts. Linux: all 41 then passed with two workers, the step taking 53 to 60 seconds (the build and start about 14, then the tests, the slow route's 30 seconds among them), and the headless shell's install 16 to 27;
+    - **`check:task`:** 36 seconds on the Mac. In CI, the checks job's equivalent steps took 79 seconds on `main` before this task (tests 61), near the 90; the three slowest test files are split, dev.sh's, the guards' and procs.sh's tests now sharing harnesses in `scripts/test/support/`, and the slowest file drops from 32 to 18 seconds. In CI the equivalent steps took 67 seconds in both runs once dev.sh's test was fixed (format 2, types 6, lint 11 to 12, databases 1, tests 46, coverage under 1), against 89 on this branch's first run; CI's slowest file is now `dev-stop.test.ts`'s 17 seconds, most of it the 15-second wait it tests;
+    - **the floor guard** flags Playwright's `test.fixme()` and `test.fail()`, on `test` or its `TestInfo`, anchored so pg-boss's `boss.fail()` and `assert.fail()` pass; Playwright's `--pass-with-no-tests`; and retries added to a test file or a runner's config;
+    - found along the way:
+      - `notFound()` in a shell page leaves the tab's title as "Instante", not "Not found · Instante": T17a's not-found page, a follow-up;
+      - the phone menu's axe run failed on CI's first run (`color-contrast`, the menu's links): the sheet fades in over 200 ms, `toBeVisible()` passes at any opacity, and axe blends colours at the opacity it finds. With the fade slowed twentyfold, axe measured 1.7:1 at a fifth and 3.5:1 at half, and nothing from four fifths up; at rest the links are near black on white. The test now waits for the sheet to be opaque;
+      - the wrong-Node case of `prod-build-check.sh` expected "Node vv26…" once the pinned version kept its `v`, which only CI runs (the Mac has no second Node);
+      - dev.sh's second-listener test took 16 seconds on Linux and 1 on the Mac: bash's process substitution leaves a second copy of the `[web]` label's pipe open in the command it runs (`/dev/fd/63`, without close-on-exec), Linux's `spawn` passes it on (macOS's closes every descriptor it isn't given), so the stub's second listener held the pipe, and the label, in the web group and ignoring TERM, waited out `end_groups`' 15 seconds. Passing descriptor 63 by hand reproduced it on the Mac. The test now fails if any group needed the KILL, and the stub starts its listener, a stand-in for a process outside next's group, through `bash` with every descriptor above 2 closed (through `sh` it hung in CI: Ubuntu's is dash, which takes only one-digit descriptors), and ends at once if that listener does, so a broken start fails in a second, not at the test's timeout. dev.sh is unchanged: on the Mac, next's children are Node's, which don't inherit it, though any other descendant left running in a group of its own would hold the stop for those 15 seconds;
+      - a review agent in T18 had linked this checkout's `node_modules` into a clone and run pnpm there, which rewrote 514 of pnpm's hidden links into the clone, since deleted, and broke ESLint here. The folder was rebuilt from the lockfile, offline; review prompts now say not to run pnpm in a clone;
+    - **a review** (four readers: the launch and profile, the end-to-end tests, CI and the gates, the documents; a skeptic per finding; a critic) found 23, 20 after merging, confirmed 12, none high, and refuted 8; the critic added 4 gaps that matter. Fixed:
+      - the profile can't keep the web port to loopback (a host is only `*` or `localhost`, and both match every address), and native code under it reads other processes' command lines and environments through the kernel's process calls, which no rule governs: R2 and the Next.js row now say so, with what else it leaves open (a listing of `/`, the logs folder's sizes and times, the system's libraries); T22's note adds the launcher's repeated `lsof` check;
+      - the end-to-end command, Playwright's config and `e2e-stack.sh` were outside the pins and the floor guard, so a narrowed run could pass every gate; the floor guard missed `testInfo.fixme()`, `test.info().fail()`, `--pass-with-no-tests` and retries;
+      - axe ran only three WCAG tags, which CONSTRAINTS.md doesn't name, so its serious best-practice rules never ran; the 44 px targets were measured only on the navigation; the page table's titles and shell were never checked;
+      - the stack outlived a runner killed outright; nothing kept a release from being built with `INSTANTE_E2E_PAGES=1` exported (T21's note);
+      - the launch test's shell, with a socket for stdin and no `SHLVL`, ran the owner's `~/.bashrc`, which put three folders ahead of the test's Node (procs.sh's harness had the same exposure);
+      - comments and documents: the trace-root case's claim, the production-build job's pointer to where the launch flags are checked, the installer's FFmpeg download and what its size check compares, the profile's size and refusals;
+    - noted elsewhere: T21's, T22's and T24's notes; the platform spec's start-up, profile, end-to-end and `check:full` lines; the threat model's Next.js, R2 and supply-chain rows;
+    - for the owner, after merging: add `e2e` to `main`'s ruleset as a required check, with T18's four (Checkpoint 3 lists them).
 
 ### Checkpoint 3
 - [ ] Every Linux job passes on one pull request (platform spec 3).
+- [ ] The owner's steps from T18 and T19 (the owner's plan, 2026-11-20): `main`'s ruleset requires `production-build`, `shellcheck`, `osv-scanner`, `semgrep` and `e2e`; Dependabot alerts and security updates are on, and Insights → Dependency graph lists `pnpm-lock.yaml`'s packages.
 - [ ] Review session: the document service (T12, T13) and `proxy.ts`'s checks (T14).
 
 ## Phase D: The local stack
@@ -572,6 +605,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
   - **Verify:** `pnpm test:local release`.
   - **Depends on:** T20. **Files:** `scripts/local/release.sh`, `scripts/local/setup.sh`, `scripts/local/test/{github-stub,release.test}.ts`. **Size:** M.
   - **Notes from T18:** the required CI jobs, by the names their check runs carry: `install`, `checks`, `production-build`, `guards`, `gitleaks`, `shellcheck`, `osv-scanner` and `semgrep`. `osv-scanner-weekly` runs from its own workflow on `main`'s newest commit, isn't required, and isn't the commit's own CI, so it doesn't decide a release. Whether a release should refuse while the latest weekly scan is failing is open, for the owner. The owner adds the four new names to `main`'s ruleset. `cli db migrate`, which a release runs, starts `pg-boss migrate` as a child (`runPgBossMigrate`, `src/store/queue.ts`) that a signal to `main.ts` doesn't stop, since `ROLE=cli` installs no handler: a deadline on it must stop the child too, or the child keeps its owner connection. T18's review found the same gap in `apps/backend/test/migrate.test.ts`, whose 12-second timeout stops only `main.ts`.
+  - **Notes from T19:** the required CI jobs add `e2e`. Build the release from a clean environment (`env -i` with the names the build needs), so an `INSTANTE_E2E_PAGES=1` left exported can't add the end-to-end fixture pages, and run `scripts/prod-build/web-sources.ts` on the release's build, which fails on any `page.e2e.tsx`.
 
 - [ ] **T22: `start`, `stop` and `status`**
   - **Does:**
@@ -593,6 +627,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
   - **Verify:** `pnpm test:local start`; the macOS job.
   - **Depends on:** T21. **Files:** `scripts/local/{start,stop,status}.sh`, `scripts/local/test/start.test.ts`. **Size:** M.
   - **Notes from T17b:** the backend stops once per signal it's sent, so a SIGINT then a SIGTERM makes it log `stop.started` twice and exit 1: start each process in its own process group and send one signal to each, as `scripts/dev.sh` does (or make `main.ts`'s stop run once). Under bash 3.2, a trap that another signal interrupts exits before cleaning up: `trap '' INT TERM HUP` at the top of the stop function, and a KILL after a deadline, as there.
+  - **Notes from T19:** start the stack with `scripts/prod-build/stack.sh`'s commands, the web app under the release's own `scripts/prod-build/web.sb` with real paths: refuse to start it if `/usr/bin/sandbox-exec` is missing, treat exit 65 (a profile error) and 71 (inside another sandbox) as failures, and give the profile the folder its output goes to (or pipe the output, as a log rotator would). `sandbox-exec` keeps the pid, so the process-group stop and the `lsof` checks are unchanged. The profile can't keep the web port to loopback (R2): repeat the loopback-only `lsof` check from the poll loop, and stop the stack if a listener on another address appears. Start the stack's processes as `stack.sh` does, from `env -i` with secrets as file paths, since any process's environment is readable to the others (R2).
 
 - [ ] **T23: `rollback`, `backup` and `restore`** (**review:** `restore`)
   - **Does:**
@@ -620,6 +655,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
   - **Verify:** the macOS job on the pull request.
   - **Depends on:** T23. **Files:** `scripts/local/cli.sh`, `scripts/local/test/macos-criteria.test.ts`, `.github/workflows/ci.yml`. **Size:** M.
   - **Notes from T18:** `scripts/prod-build/selftest.ts` runs `selftest` on a running stack, from the backend's own documents client, and exits 1 unless it's ok; the macOS job can call it with the release's four: its documents socket, its backend port, its database socket (`$INSTANTE_HOME/run/.s.PGSQL.5432`) and its secrets folder (`$INSTANTE_HOME/secrets`).
+  - **Notes from T19:** the macOS job runs `scripts/test/web-launch.test.ts`, whose climb through the pnpm link expects EPERM there, and checks that `/usr/bin/sandbox-exec` exists and that an unprivileged `log stream` works on the runner.
 
 - [ ] **T25: Guides, runbooks and the link check**
   - **Does:**
@@ -714,7 +750,7 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
     - `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in each one's settings and `.env.example`;
     - both names added to `start`'s allowed list, read from `config.env`.
   - **Acceptance:** every existing end-to-end and macOS check still passes with the real `authenticate` and the fake.
-  - **Verify:** `pnpm --filter @instante/web test:e2e`; `pnpm test:local`; the macOS job.
+  - **Verify:** `pnpm test:e2e`; `pnpm test:local`; the macOS job.
   - **Depends on:** A5. **Files:** `apps/web/playwright.config.ts`, `scripts/dev.sh`, `scripts/local/start.sh`, `.env.example`, `scripts/local/test/macos-criteria.test.ts`. **Size:** M.
 
 - [ ] **A7: Supabase's clients and the token provider**
@@ -742,7 +778,7 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
     - the session step's outcomes are unit-tested, including a failed key-set fetch letting the request through;
     - `next=//elsewhere` returns to `/`;
     - every platform test still passes, signed in.
-  - **Verify:** `pnpm --filter @instante/web test proxy session`; `pnpm --filter @instante/web test:e2e`; the macOS job.
+  - **Verify:** `pnpm --filter @instante/web test proxy session`; `pnpm test:e2e`; the macOS job.
   - **Depends on:** A7. **Files:** `apps/web/proxy.ts`, `apps/web/lib/auth/next-path.ts`, `apps/web/lib/auth/session.test.ts`, `apps/web/e2e/helpers/sign-in.ts`, plus edits to the existing end-to-end specs and `macos-criteria.test.ts`. **Size:** M.
 
 - [ ] **A9: The sign-in pages**
@@ -765,7 +801,7 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
     - the CSP on the sign-in pages, and axe;
     - with the fake's key endpoint failing (`POST /__test/outage`), a signed-in session keeps working and isn't redirected.
   - **Acceptance:** accounts spec 5 and 9 pass in CI.
-  - **Verify:** `pnpm --filter @instante/web test:e2e -- sign-in`.
+  - **Verify:** `pnpm test:e2e sign-in`.
   - **Depends on:** A9. **Files:** `apps/web/e2e/sign-in.spec.ts`. **Size:** S.
 
 - [ ] **A11: Owner commands and deletion** (**review:** deletion)

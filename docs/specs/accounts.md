@@ -198,7 +198,7 @@ pnpm --filter @instante/backend cli users add jordan@example.com <user-id>
 pnpm --filter @instante/backend test auth
 ```
 ```bash
-pnpm --filter @instante/web test:e2e -- sign-in
+pnpm test:e2e sign-in
 ```
 
 For real use, the owner runs them as `instante cli users …` in their own terminal ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md)); agents never do.
