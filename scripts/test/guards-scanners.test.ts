@@ -128,9 +128,10 @@ describe('floor-guard', () => {
     expect(repo.run(guard)).toMatchObject({ status: 0 });
   });
 
-  it('leaves retries in application code alone', () => {
+  it('leaves retries in application code, and none in a runner’s config, alone', () => {
     const repo = makeRepo();
-    repo.write('apps/backend/src/fetch.ts', 'export const options = { retries: 3 };\n');
+    repo.write('apps/backend/src/fetch.ts', k('export const options = { retri', 'es: 3 };\n'));
+    repo.write('apps/web/playwright.config.ts', k('export default { retri', 'es: 0 };\n'));
     expect(repo.run(guard)).toMatchObject({ status: 0 });
   });
 

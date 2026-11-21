@@ -273,8 +273,8 @@ const SKIPS: RegExp[] = [
   // A run that finds no test file passes: Vitest's spelling and Playwright's.
   /passWithNoTest[s]|pass-with-no-test[s]/,
 ];
-// A failure retried until it passes, in a test file or a runner's config.
-const RETRIES = /\bretr(y|ie[s])\s*:/;
+// A failure retried until it passes, in a test file or a runner's config: any count but a plain 0.
+const RETRIES = /\bretr(y|ie[s])\s*:(?!\s*0\b)/;
 const isRunnerConfig = (f: string): boolean =>
   /(^|\/)(vitest|playwright)\.config\.[cm]?ts$/.test(f);
 
