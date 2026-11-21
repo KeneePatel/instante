@@ -267,11 +267,16 @@ const STUBS: RegExp[] = [
 const SKIPS: RegExp[] = [
   /\.(ski[p]|onl[y]|tod[o]|skipI[f]|runI[f])\(/,
   /\b(xi[t]|xdescrib[e]|xtes[t])\(/,
-  // Playwright's: a test marked to be fixed, or expected to fail (not pg-boss's boss.fail()).
-  /\btest(\.describe)?\.(fixm[e]|fai[l])\(/,
-  // A run that finds no test file passes.
-  /passWithNoTest[s]/,
+  // Playwright's: a test marked to be fixed, or expected to fail, on test or on its TestInfo (not
+  // pg-boss's boss.fail()).
+  /\b(test(\.describe)?|testInfo|test\.info\(\))\.(fixm[e]|fai[l])\(/,
+  // A run that finds no test file passes: Vitest's spelling and Playwright's.
+  /passWithNoTest[s]|pass-with-no-test[s]/,
 ];
+// A failure retried until it passes, in a test file or a runner's config.
+const RETRIES = /\bretr(y|ie[s])\s*:/;
+const isRunnerConfig = (f: string): boolean =>
+  /(^|\/)(vitest|playwright)\.config\.[cm]?ts$/.test(f);
 
 // 4. The web app's bans (ADR-005), and the auth rule (ADR-004).
 const WEB_BANS: RegExp[] = [
@@ -302,7 +307,11 @@ for (const { file: f, text } of added) {
     for (const p of SUPPRESSIONS) if (p.test(text)) flag('silenced-checker', f, text);
     for (const p of STUBS) if (p.test(text)) flag('unfinished-work', f, text);
     for (const p of SKIPS) if (p.test(text)) flag('test-made-easier', f, text);
-  } else if (/(^|\/)package\.json$/.test(f) && /passWithNoTest[s]/.test(text)) {
+    if ((isTest(f) || isRunnerConfig(f)) && RETRIES.test(text)) flag('test-made-easier', f, text);
+  } else if (
+    /(^|\/)package\.json$/.test(f) &&
+    /passWithNoTest[s]|pass-with-no-test[s]/.test(text)
+  ) {
     flag('test-made-easier', f, text);
   }
   if (f.startsWith('apps/web/') && isCode(f)) {

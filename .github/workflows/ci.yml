@@ -104,9 +104,10 @@ jobs:
           "$RUNNER_TEMP/diff-cover/bin/diff-cover" coverage/lcov.info \
             --compare-branch=origin/main --fail-under=80
 
-  # The production build's checks (docs/specs/platform.md, criterion 7, apart from the web app's
-  # launch flags, which the end-to-end tests check): scripts/prod-build-check.sh, in production
-  # mode in a scratch home, against this Postgres through a relay on the home's socket.
+  # The production build's checks (docs/specs/platform.md, criterion 7, apart from what the web
+  # app's launch flags deny, which scripts/test/web-launch.test.ts checks in the checks job):
+  # scripts/prod-build-check.sh, in production mode in a scratch home, against this Postgres
+  # through a relay on the home's socket.
   production-build:
     name: production-build
     runs-on: ubuntu-24.04
@@ -156,8 +157,9 @@ jobs:
   # The end-to-end tests (docs/specs/platform.md, criterion 8; T19): Playwright on Chromium's
   # headless shell against the production build, which scripts/e2e-stack.sh builds with its
   # fixture pages and starts as `instante start` does, with INSTANTE_ENV=test. The browser comes
-  # from Playwright's own installer, which checks no hash (the owner's choice, 2026-11-20; the
-  # threat model lists it with the other CI tools no SHA-256 here pins), with apt's libraries.
+  # from Playwright's own installer, which checks no hash, only the length the server sends (the
+  # owner's choice, 2026-11-20; the threat model lists it with the other CI tools no SHA-256 here
+  # pins), with apt's libraries; it fetches Playwright's FFmpeg build too, from Microsoft's CDN.
   e2e:
     name: e2e
     runs-on: ubuntu-24.04
@@ -190,7 +192,7 @@ jobs:
       - name: Chromium's headless shell, with its libraries
         run: pnpm --filter @instante/web exec playwright install --with-deps --only-shell chromium
       - name: The end-to-end tests
-        run: pnpm --filter @instante/web test:e2e
+        run: pnpm test:e2e
 
   guards:
     name: guards

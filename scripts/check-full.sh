@@ -11,5 +11,5 @@ set -u -o pipefail
 cd "$(dirname "$0")/.." || exit 1
 pnpm check:task || exit 1
 bash scripts/ci/shellcheck.sh || exit 1
-pnpm --filter @instante/web test:e2e || exit 1
+pnpm test:e2e || exit 1
 echo "check:full: every check passed; osv-scanner and Semgrep run only in CI"

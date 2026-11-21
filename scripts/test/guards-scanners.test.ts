@@ -128,6 +128,12 @@ describe('floor-guard', () => {
     expect(repo.run(guard)).toMatchObject({ status: 0 });
   });
 
+  it('leaves retries in application code alone', () => {
+    const repo = makeRepo();
+    repo.write('apps/backend/src/fetch.ts', 'export const options = { retries: 3 };\n');
+    expect(repo.run(guard)).toMatchObject({ status: 0 });
+  });
+
   // A commit that moves an assertion within its file vouches for nothing a later one removes.
   it('takes no reason for an assertion a commit only moved', () => {
     const test = "it('a', () => {\n  expect(1).toBe(1);\n});\nit('b', () => {});\n";
@@ -149,6 +155,20 @@ describe('floor-guard', () => {
     ['test-made-easier', 'package.json', k('{ "vitest": { "passWithNo', 'Tests": true } }\n')],
     ['test-made-easier', 'apps/web/e2e/a.spec.ts', k('test.fix', "me('a', () => {});\n")],
     ['test-made-easier', 'apps/web/e2e/a.spec.ts', k('test.describe.fa', "il('a', () => {});\n")],
+    ['test-made-easier', 'apps/web/e2e/a.spec.ts', k('  testInfo.fix', 'me();\n')],
+    ['test-made-easier', 'apps/web/e2e/a.spec.ts', k('  test.info().fa', 'il();\n')],
+    [
+      'test-made-easier',
+      'apps/web/e2e/a.spec.ts',
+      k('test.describe.configure({ retri', 'es: 2 });\n'),
+    ],
+    ['test-made-easier', 'apps/web/playwright.config.ts', k('  retri', 'es: 1,\n')],
+    ['test-made-easier', 'src/a.test.ts', k("it('a', { retr", 'y: 3 }, () => {});\n')],
+    [
+      'test-made-easier',
+      'package.json',
+      k('{ "scripts": { "test:e2e": "playwright test --pass-with-no', '-tests" } }\n'),
+    ],
     ['silenced-checker', 'scripts/x.bash', `#!/bin/bash\n# ${SC_DISABLE}=SC2086\necho $1\n`],
     [
       'scanner-weakened',

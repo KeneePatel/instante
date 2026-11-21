@@ -38,6 +38,9 @@ function probe(paths: string[]): Record<string, string> {
     ],
     {
       encoding: 'utf8',
+      // stdin from /dev/null: with a socket there and no SHLVL, bash -c takes itself for rshd's
+      // and runs ~/.bashrc first, which may change PATH before stack_node reads it.
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
         ROOT,

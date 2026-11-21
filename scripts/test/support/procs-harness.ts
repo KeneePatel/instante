@@ -54,9 +54,11 @@ export function withProcs(body: string, check?: string) {
     );
   }
   const script = `set -u -o pipefail\nPROCS="$1"\n. "$1" || exit 2\n. ./helpers.sh\n${body}`;
+  // stdin from /dev/null, so bash -c never takes itself for rshd's and runs ~/.bashrc.
   const result = spawnSync('/bin/bash', ['-c', script, 'bash', PROCS], {
     cwd: dir,
     encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
     timeout: 40_000,
   });
   return { status: result.status, output: result.stdout + result.stderr };
