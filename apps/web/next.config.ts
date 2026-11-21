@@ -29,6 +29,12 @@ export default function config(phase: string): NextConfig {
       proxyTimeout: 30_000,
     },
     images: { unoptimized: true },
+    // The end-to-end build's fixture pages (T19): `page.e2e.tsx` files under `e2e/` folders,
+    // which reach the error screens the app ships no way into. Only a build with
+    // INSTANTE_E2E_PAGES=1 has them as pages; to any other build, the file is no page at all.
+    ...(process.env['INSTANTE_E2E_PAGES'] === '1'
+      ? { pageExtensions: ['tsx', 'ts', 'jsx', 'js', 'e2e.tsx'] }
+      : {}),
     turbopack: {
       rules: {
         '*.css': {

@@ -153,6 +153,45 @@ jobs:
       - name: The production build, started and checked
         run: bash scripts/prod-build-check.sh
 
+  # The end-to-end tests (docs/specs/platform.md, criterion 8; T19): Playwright on Chromium's
+  # headless shell against the production build, which scripts/e2e-stack.sh builds with its
+  # fixture pages and starts as `instante start` does, with INSTANTE_ENV=test. The browser comes
+  # from Playwright's own installer, which checks no hash (the owner's choice, 2026-11-20; the
+  # threat model lists it with the other CI tools no SHA-256 here pins), with apt's libraries.
+  e2e:
+    name: e2e
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        # The same Postgres as the checks job's.
+        image: postgres:18.6-bookworm@sha256:f1ea2a1a4fb7b68d4836be1fdcb8a6466a89b072158bf9d97663600538c294c5
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale-provider=builtin --builtin-locale=C.UTF-8 --locale=C
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - name: Install from the lockfile
+        run: pnpm install --frozen-lockfile
+      - name: The development and test databases
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+        run: bash scripts/dev-db.sh
+      - name: Chromium's headless shell, with its libraries
+        run: pnpm --filter @instante/web exec playwright install --with-deps --only-shell chromium
+      - name: The end-to-end tests
+        run: pnpm --filter @instante/web test:e2e
+
   guards:
     name: guards
     runs-on: ubuntu-24.04

@@ -36,6 +36,23 @@ describe('next.config.ts', () => {
     expect(built.env).toEqual({ INSTANTE_BUILT_BACKEND: '' });
   });
 
+  // The end-to-end build's fixture pages (page.e2e.tsx) are pages only with the flag; any other
+  // build, a release's above all, keeps Next's own extensions and so never serves one.
+  it('takes the e2e fixture pages as pages only with INSTANTE_E2E_PAGES=1', () => {
+    vi.stubEnv('INSTANTE_E2E_PAGES', undefined);
+    expect(config(PHASE_PRODUCTION_BUILD).pageExtensions).toBeUndefined();
+    vi.stubEnv('INSTANTE_E2E_PAGES', 'yes');
+    expect(config(PHASE_PRODUCTION_BUILD).pageExtensions).toBeUndefined();
+    vi.stubEnv('INSTANTE_E2E_PAGES', '1');
+    expect(config(PHASE_PRODUCTION_BUILD).pageExtensions).toEqual([
+      'tsx',
+      'ts',
+      'jsx',
+      'js',
+      'e2e.tsx',
+    ]);
+  });
+
   it('refuses an address off loopback when building or in development, and leaves a start to the check', () => {
     vi.stubEnv('BACKEND_INTERNAL_URL', 'http://evil.example:4311');
     const message =

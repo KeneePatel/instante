@@ -11,7 +11,8 @@
         "gitleaks": "406cac2bd445e95b8603475e94121550a9060cce2bf1b949ac45dc2e31e29311",
         "shellcheck": "8f28521a869bbeb44f82d4379e0be498bb2402f4912c6f3379c940fe0ea81a4c",
         "osv-scanner": "390b0939908c36cf8e614ee647065da4f2544275416a4982cf9d00034728519c",
-        "semgrep": "d7d065eb2cd29bed51c29912257999d2ccefea2669306fca38bcec6099ae4d16"
+        "semgrep": "d7d065eb2cd29bed51c29912257999d2ccefea2669306fca38bcec6099ae4d16",
+        "e2e": "d5f10d38d561e13fcc6185e45a9daac260d65f6407981c6f0e98bc2d9b053d9d"
       }
     },
     ".github/workflows/osv-weekly.yml": {
