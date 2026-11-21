@@ -363,7 +363,7 @@ The subcommands:
 - **`.github/workflows/ci.yml`,** on pushes and pull requests. It holds no secrets, because nothing deploys from CI. Its jobs, mostly in parallel:
   - format, lint and types;
   - unit and integration tests on a `postgres:18` service, started with `POSTGRES_INITDB_ARGS` for the pinned locale and set to Postgres's non-durable settings (`fsync`, `full_page_writes` and `synchronous_commit` off), since every `DROP DATABASE` forces a checkpoint and the runner's disk made those slow enough to time tests out; with coverage of changed lines;
-  - the floor guard, both the change's own and the one at the merge base with `main` (`scripts/ci/floor-guard-base.sh`), so a change can't weaken the guard that judges it; the check on committed `.claude/` settings; and the checks' pins, run by their path. The pins (`scripts/test/scanner-pins.json`, checked by `scripts/test/scanner-pins.test.ts`, both part of the bar to the guard) hold each workflow's top-level settings and each checking job by hash, comment lines and each action's pinned version left out so Dependabot's bumps pass; the scanners' scripts and `scripts/check-osv.ts` by hash; the `package.json` commands CI calls; each scanner's arguments, and ShellCheck's choice of files; and CONSTRAINTS.md's CVSS bar. The test also checks that no other job answers to a checking job's name, and that each scanner's script passes on its exit;
+  - the floor guard, both the change's own and the one at the merge base with `main` (`scripts/ci/floor-guard-base.sh`), so a change can't weaken the guard that judges it; the check on committed `.claude/` settings; and the checks' pins, run by their path. The pins (`scripts/test/scanner-pins.json`, checked by `scripts/test/scanner-pins.test.ts`, both part of the bar to the guard) hold each workflow's top-level settings and each checking job by hash, comment lines and each action's pinned version left out so Dependabot's bumps pass; the scanners' scripts, `scripts/check-osv.ts`, Playwright's config and `scripts/e2e-stack.sh` by hash; the `package.json` commands CI calls; each scanner's arguments, and ShellCheck's choice of files; and CONSTRAINTS.md's CVSS bar. The test also checks that no other job answers to a checking job's name, and that each scanner's script passes on its exit;
   - gitleaks over git;
   - osv-scanner, Semgrep and ShellCheck (decided in T18):
     - ShellCheck 0.11.0, the Mac's version, over every shell script in `scripts/` (`scripts/ci/shellcheck.sh`), with no rc file and no `SHELLCHECK_OPTS`;
@@ -373,7 +373,7 @@ The subcommands:
   - the production build (`scripts/prod-build-check.sh`), in production mode in a scratch home, against the Postgres service through a relay on the home's socket: criterion 7 apart from the web app's launch flags, and T15's start-up check;
   - end-to-end tests with axe (the `e2e` job), against a production build started the way `instante start` starts it. Playwright waits on the backend's `/readyz` rather than a page, since a page needs the right `Host`, and the slow-route test gets its own 45-second timeout. Chromium's headless shell, with Playwright's FFmpeg build, comes from Playwright's own installer, which checks no hash, only the length the server sends (the owner's choice, 2026-11-20);
   - **the local stack, on a GitHub-hosted macOS runner** with a pinned label, a timeout well under 6 hours, and older runs of the same branch cancelled:
-    - it checks for `lockf`, `lsof` and `realpath`;
+    - it checks for `lockf`, `lsof`, `realpath` and `/usr/bin/sandbox-exec`, and that an unprivileged `log stream` works (T24);
     - then Homebrew's `postgresql@18`;
     - then `setup`, a second `release`, `start`, the checks below, `backup`, `restore`, `rollback` and `stop`, in a short scratch `INSTANTE_HOME` whose path contains a space.
 
@@ -420,7 +420,7 @@ pnpm --filter @instante/backend cli db migrate
 
 - `check:fast` runs Prettier, untyped ESLint and gitleaks on the changed files, in under 5 seconds.
 - `check:task` adds each package's `typecheck`, typed ESLint, Vitest with coverage, and the floor guard, in under 90 seconds.
-- `check:full` adds ShellCheck and the end-to-end tests, as CI runs them. osv-scanner and Semgrep run only in CI (the owner's choice, 2026-11-20): neither is installed on the Mac, and CI runs Semgrep from its image. The end-to-end tests need Chromium's headless shell, `pnpm --filter @instante/web exec playwright install --only-shell chromium`, and ports 4320 and 4321 free, so they can't run beside the production-build check.
+- `check:full` adds ShellCheck and the end-to-end tests, as CI runs them. osv-scanner and Semgrep run only in CI (the owner's choice, 2026-11-20): neither is installed on the Mac, and CI runs Semgrep from its image. The end-to-end tests need Chromium's headless shell, `pnpm -C apps/web exec playwright install --only-shell chromium`, and ports 4320 and 4321 free, so they can't run beside the production-build check.
 
 The owner's own commands for real use (`instante setup`, `start`, `release`, `backup`, `restore`, `status`, `cli`) run only in the owner's terminal, from `~/.instante/bin/instante`. Agents never run them.
 
