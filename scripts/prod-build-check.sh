@@ -197,8 +197,9 @@ mismatch unset
 mismatch unset INSTANTE_BUILT_BACKEND="$other_url"
 
 # The root variable is private to Next.js (platform spec, the web command): without it, Next
-# looks for a workspace root above the checkout, which the read grant refuses. A Next.js that
-# stops reading it fails here first.
+# looks for a workspace root above the checkout, which the read grant refuses. This shows why the
+# launch sets it; a Next.js that stopped reading it would fail the cases above, which set it and
+# would stop on that refusal before their own message.
 run_for 60 web BACKEND_INTERNAL_URL="$backend_url" NEXT_PRIVATE_OUTPUT_TRACE_ROOT= \
   >"$work/logs/case.log" 2>&1
 status=$?

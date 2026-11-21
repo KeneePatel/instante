@@ -8,8 +8,10 @@
 #      INSTANTE_ENV=test, the web app under its permission flags and, on macOS, its sandbox
 #      profile. The backend comes last, so its /readyz, which Playwright waits on, answers only
 #      once the web app does.
-# It then runs until Playwright stops it (TERM), or until one of them ends, and stops them all
-# and removes its folder either way (procs.sh).
+# It then runs until Playwright stops it (TERM), until one of them ends, or until the process
+# that started it has gone (a runner killed, or its terminal closed, which runs none of
+# Playwright's own teardown), and stops them all and removes its folder each way (procs.sh).
+# Playwright's shell execs this script, so that process is the runner itself; the log names it.
 #
 # The checkout may hold apps/web/.env.local for `pnpm dev`, which `next build` and `next start`
 # would apply for any name their environment lacks; __NEXT_PROCESSED_ENV, a private name of
@@ -32,6 +34,8 @@ stop() {
   exit 1
 }
 
+parent=$PPID
+say "started by process $parent ($(ps -o comm= -p "$parent" 2>/dev/null))"
 stack_node || exit 2
 stack_ports || exit 2
 work="$(mktemp -d "${TMPDIR:-/tmp}/ie2e.XXXXXX")" || exit 2
@@ -56,10 +60,18 @@ stack_backend || stop "the backend didn't start:$(stack_said backend)"
 backend_pid=$last_pid
 say "ready: the web app at http://localhost:$web_port, the backend at $backend_url"
 
-while kill -0 "$relay_pid" && kill -0 "$documents_pid" && kill -0 "$web_pid" &&
-  kill -0 "$backend_pid"; do
+# Once the process that started it has gone, nothing reads its output (a write would end it on
+# SIGPIPE), so it says nothing more and exits; the EXIT trap stops the rest.
+while :; do
+  for pid in "$relay_pid" "$documents_pid" "$web_pid" "$backend_pid"; do
+    kill -0 "$pid" 2>/dev/null || break 2
+  done
+  if ! kill -0 "$parent" 2>/dev/null; then
+    exec >/dev/null 2>&1
+    exit 1
+  fi
   sleep 1
-done 2>/dev/null
+done
 for name in relay documents web backend; do
   echo "--- $name" >&2
   tail -n 20 "$work/logs/$name.log" >&2
