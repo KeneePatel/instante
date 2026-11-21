@@ -142,8 +142,13 @@ function serve() {
   // It leaves its worker to the group's TERM, as next dev's own children are reached.
   process.on('SIGTERM', () => server.close(() => process.exit(0)));
 }
+// The second listener stands for a process outside next's group, so it starts, through sh, with
+// every descriptor above 2 closed: Linux's spawn passes on those without close-on-exec, among
+// them bash's copy of the [web] label's pipe (/dev/fd/63), and the label, in the web group,
+// would wait out dev.sh's 15 seconds for it to close.
 if (existsSync('../../marker-second-listener')) {
-  const second = spawn(process.execPath, [__filename, 'second', String(port)], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  const closeAbove2 = 'fd=3; while [ "$fd" -lt 256 ]; do eval "exec $fd>&-"; fd=$((fd + 1)); done; exec "$@"';
+  const second = spawn('/bin/sh', ['-c', closeAbove2, 'sh', process.execPath, __filename, 'second', String(port)], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
   record.second = second.pid;
   second.stdout.once('data', () => { second.stdout.destroy(); second.unref(); serve(); });
 } else serve();
