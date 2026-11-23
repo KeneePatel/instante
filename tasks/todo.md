@@ -694,6 +694,12 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
   - **Acceptance:** with sign-ups off, the user signs in by emailed code, and the token reaches `aal2` after the authenticator step (accounts spec 1). A failure reopens ADR-004 before any sign-in code exists.
   - **Verify:** the script prints the token's `aal` claim.
   - **Depends on:** T4. **Files:** `docs/runbooks/supabase.md`, `scripts/supabase-check.sh`. **Size:** S.
+  - **As built (the agent's part, 2026-11-23; the box is ticked once the owner's run prints `aal2`):**
+    - the calls checked against Supabase's auth server source (`internal/api/{api,verify,mfa}.go`), since its OpenAPI file lists no `email` type for `/verify`: `POST /otp` with `create_user: false`, `POST /verify` with `type: "email"`, `GET /user` for the factors, `POST /factors`, then `/factors/<id>/challenge` and `/factors/<id>/verify`, and `POST /logout?scope=local`;
+    - an unfinished enrolment is removed first, since enrolling refuses a factor name already taken, even by an unverified factor; a verified factor is challenged without enrolling;
+    - values come from standard input, never arguments, and tokens and codes reach curl through `--config -` and Node through its standard input, so no command line holds one; the secret key and a `service_role` key are refused before any request; plain `http` only for this Mac's own addresses;
+    - given Instante's address, it prints what `GET /api/me` answers to the `aal1` and the `aal2` token, without Supabase's key: the runbook's O2 steps (accounts spec 4), spaced out because Supabase's built-in email sends 2 an hour;
+    - `scripts/test/supabase-check.test.ts` runs it against a stub of the auth server and `/api/me`, with a `curl` on `PATH` logging its command lines; five mutations (asking Supabase to create users, a token on curl's command line, no code-length check, an unfinished enrolment kept, Supabase's key sent to Instante) each fail it.
 
 - [ ] **A2: The fake Supabase**
   - **Does:** `test/fake-supabase/{app,totp,keys}.ts`, plus a runnable entry point, `main.ts`:
