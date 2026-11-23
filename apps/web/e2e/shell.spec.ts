@@ -14,6 +14,19 @@ async function expectTouchSize(target: Locator): Promise<void> {
 const focusIsIn = (page: Page, dialog: Locator) =>
   dialog.evaluate((element) => element.contains(document.activeElement));
 
+/**
+ * Waits for the sheet's slide-in to end: a target measured mid-slide sits at a fractional
+ * position, and its box can come out a hair under 44 px (43.99998 in a CI run).
+ */
+async function settled(sheet: Locator): Promise<void> {
+  await expect(sheet).toHaveCSS('opacity', '1');
+  await sheet.evaluate(async (element) => {
+    await Promise.all(
+      element.getAnimations({ subtree: true }).map((animation) => animation.finished),
+    );
+  });
+}
+
 test.describe('on a phone, 375 px wide', () => {
   test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
@@ -28,6 +41,7 @@ test.describe('on a phone, 375 px wide', () => {
     await expect(menu).toBeVisible();
     // Focus moves in once the sheet has opened, just after it shows.
     await expect.poll(() => focusIsIn(page, menu)).toBe(true);
+    await settled(menu);
     for (const link of await menu.getByRole('link').all()) await expectTouchSize(link);
     await expectTouchSize(menu.getByRole('button', { name: 'Close the menu' }));
     await page.keyboard.press('Escape');
