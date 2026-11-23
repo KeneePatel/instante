@@ -18,7 +18,7 @@ When `accounts` is done:
 
 ## Assumptions
 
-1. The owner creates two Supabase projects on the Free plan: development, and production in Canada (Central).
+1. The owner creates two Supabase projects on the Free plan: development at A1, and production in Canada (Central) before O2, so it doesn't sit idle and pause (R8; the owner's choice, 2026-11-23).
 2. Built-in email, which reaches only the owner, is enough.
 3. `platform` is done: `registerRoutes` takes an injected `authenticate`, the fetch helper takes a token provider, and `proxy.ts` builds the CSP.
 4. Real use is at `http://instante.localhost:4310` on the owner's Mac ([ADR-012](../decisions/ADR-012-run-on-the-owners-mac.md)), with no domain (decision D8: not now).

@@ -114,7 +114,7 @@ Accepted 2026-11-13. At the phase 2 gate the owner chose to run Instante on thei
 - **Agents and the real data:** the agents share the Mac and the user account, so the operating system doesn't keep them out. The controls are:
   - [`AGENTS.md`](../../AGENTS.md): never read `~/.instante`, never run `instante`, never connect to the real-use cluster, never loosen the agent settings;
   - Claude Code deny rules for `Read` and `Edit` of `~/.instante/**`, in the repository and in the owner's user settings (set 2026-11-13), which a repository can't undo;
-  - not yet: Claude Code's sandbox with `~/.instante` denied, which would also cover interpreters. The owner decides on it, or on a separate macOS user, before the alpha, when real data first arrives;
+  - not added: Claude Code's sandbox with `~/.instante` denied, which would also cover interpreters. On 2026-11-23 the owner decided against it and against a separate macOS user, keeping the rules above (R9);
   - CI fails if a committed `.claude/` settings file has a `sandbox` key, an `allowRead`, or a rule naming `~/.instante` that isn't a deny; the sandbox lives only in the owner's user settings;
   - the scripts' tests run against a scratch `INSTANTE_HOME`. The default home is used only by a script running from inside `~/.instante/releases/`, or by the first `setup`. Any other run must name a home, and is refused if that home is the same folder as `~/.instante` (compared by device and inode, not by spelling);
   - no production secret sits in the repository, its `.env` files or the owner's shell profile.
@@ -134,7 +134,7 @@ Accepted 2026-11-13. At the phase 2 gate the owner chose to run Instante on thei
 | Docker on the Mac (Docker Desktop, OrbStack or Colima) | Would keep ADR-011's container isolation for the document service and the web app, but needs a new install and a virtual machine, for risks that stay small while only the owner uploads |
 | `http://localhost:4310` or `http://127.0.0.1:4310` for real use | Every other local server at the same host name, the agents' development build included, would share the production session cookie |
 | The Homebrew cluster for real use too, in its own database | That cluster trusts every local connection, so the development databases and the real data would share one unlocked door |
-| A separate macOS user for the real-use stack | The operating system would keep the agents out of the real data, but every owner command needs a user switch. Decided before the alpha |
+| A separate macOS user for the real-use stack | The operating system would keep the agents out of the real data, but every owner command needs a user switch. Not chosen (the owner, 2026-11-23) |
 | Building releases in place, in one clone | A failed install or build would leave the live copy broken |
 | A rollback mode that runs older code on a newer schema | Needs expand-only migrations and pg-boss downgrades, which change about weekly in pg-boss 12; restoring the pre-release dump is simpler for one person, at the cost of the work since the release |
 | Starting at login (a LaunchAgent) | Collection would run whenever the Mac is on, but it's more to install and to stop. Later, if the owner wants it |

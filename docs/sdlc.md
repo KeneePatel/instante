@@ -1,6 +1,6 @@
 # How Instante gets built
 
-**Now:** phase 3, *Build in slices*, starts with the owner's ruleset on `main` and task T1 of [`tasks/todo.md`](../tasks/todo.md). Phase 2 was signed off on 2026-11-13, with the plan and task list for `platform` and `accounts` approved; phase 1 was signed off the same day.
+**Now:** phase 3, *Build in slices*: T1 to T19 of [`tasks/todo.md`](../tasks/todo.md) are merged and Checkpoint 3 is done (2026-11-23); T20 is next. Phase 2 was signed off on 2026-11-13, with the plan and task list for `platform` and `accounts` approved; phase 1 was signed off the same day.
 
 Instante is built in five phases. Each version goes round them again: version 1 is the smallest product that's useful for one job search, and complexity comes in later versions, only when a trigger in [`architecture.md`](architecture.md#later-and-what-triggers-it) is measured. A phase ends at a gate that only the owner can sign off, and the next phase never starts in the same turn ([`AGENTS.md`](../AGENTS.md)).
 
@@ -212,8 +212,8 @@ Entry: phase 2 signed off.
    The configuration is chosen on the tuning pairs ([ADR-010](decisions/ADR-010-claude-models-are-configuration.md)), and only that one runs on the held-out pairs. The owner sees the numbers at the demo.
 6. **`inbox`.**
 7. **The owner-only alpha, the first real use with data.**
-   - Migrations are squashed into a baseline. The owner drops and recreates the real-use database and pg-boss's schema from it, and checks that FileVault is on and that Time Machine copies `~/.instante/backups`.
-   - Before it, the data terms of Anthropic and Supabase are accepted, because the alpha puts real data with them, and the owner decides whether to add Claude Code's sandbox or a separate macOS user for real use (R9).
+   - Migrations are squashed into a baseline. The owner drops and recreates the real-use database and pg-boss's schema from it, and checks that FileVault is on (it was on 2026-11-23) and that Time Machine copies `~/.instante/backups` to the owner's own disk.
+   - Before it, the data terms of Anthropic and Supabase are accepted, because the alpha puts real data with them. R9's question is settled: on 2026-11-23 the owner chose to keep the deny rules alone, with neither Claude Code's sandbox nor a separate macOS user.
    - The owner uses collection and screening for their real search for about a week, on the real-use database, the production Supabase project and the production AI workspace.
    - From here on, migrations only expand.
 8. **`tailoring`.** It includes the tailoring eval, from which the model is chosen, then `applications`.
@@ -225,7 +225,7 @@ Every command is checked against its docs again on the day, because versions mov
 **Questions for the owner in this phase:**
 - the eval labels;
 - creating the public GitHub repository;
-- creating the Anthropic workspaces and keys, and the two Supabase projects;
+- creating the Anthropic workspaces and keys when the `ai` module starts, the development Supabase project at A1 and the production one before O2 (the owner's choices, 2026-11-23);
 - setting up the real-use stack on the Mac (`instante setup`) and releasing to it.
 
 ## Phase 4: Verify and release

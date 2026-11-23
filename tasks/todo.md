@@ -113,7 +113,7 @@
   - **Verify:** `pnpm --filter @instante/backend test kit`.
   - **Depends on:** T6. **Files:** `src/kit/{sanitize,logger,errors,clock,ids}.ts` and their tests. **Size:** S.
 
-- [ ] **T8: The API and its request checks** (**review:** fail-closed routes; the `Host`, `X-Forwarded-Host` and Fetch Metadata checks)
+- [x] **T8: The API and its request checks** (**review:** fail-closed routes; the `Host`, `X-Forwarded-Host` and Fetch Metadata checks)
   - **Does:**
     - `src/main.ts`, reading `ROLE` and the configuration (moved from T6), through `src/start.ts` so tests can start it in-process;
     - `registerRoutes`, failing closed;
@@ -271,7 +271,7 @@
     - **docs:** ADR-012's job-folder lines and the spec's `code/` wording.
   - **Carried forward:**
     - T19, T22 and T24: the web app's grant, the release folder, has the same flaw. The release's own `apps/backend/node_modules/@instante/contract` link lets a path that reads as inside it reach outside, `~/.instante/secrets` included. The owner chose a macOS `sandbox-exec` profile around `next start` (2026-11-16), added to those tasks.
-    - Parser tasks: their packages go into each job's code, bundled (rolldown 1.2.16 is already in the lockfile through vite, but would be a new direct devDependency) or copied without links (about 270 ms a job for a parser's closure of some 2,000 files, which favours a bundle), decided with the first one.
+    - Parser tasks: their packages go into each job's code, bundled (rolldown 1.2.16 is already in the lockfile through vite, but would be a new direct devDependency) or copied without links (about 270 ms a job for a parser's closure of some 2,000 files, which favours a bundle), decided with the first one; the owner leans to the bundle (2026-11-23), confirmed once that parser's size is known.
     - R2's revisit trigger, "a sandbox profile for the document service proves easy", is met: the design check ran a 15-line `sandbox-exec` profile on macOS 27 that blocked the same escapes, at about 8 ms per child. The owner chose not to add it for the children (2026-11-16), accepting under R2 the case where another local account helps a compromised child.
 
 - [x] **T14: The web app's request rules** (**review:** `proxy.ts`'s checks)
@@ -483,7 +483,7 @@
     - **a review of those fixes** (three readers: bypasses, false positives, the documents; a skeptic per finding), run again after its first run lost the network, confirmed 20 findings, none high, refuting five. The pins then spotted text, so a quoted `'if'`, `needs:` on a skipped job, a step added or written in flow style, a composite action, a stub job taking a check's name, `set +eu`, and `|| true` or `trap 'exit 0' EXIT` in `semgrep.sh` all got past them, and an added line could switch a pin off; hence the pins as data and by hash, and rule 10 as above. Also fixed: `.skipIf`, `.runIf` and `passWithNoTests`; `.bash` scripts; CI shell writing an ignore file or moving `origin/main`; a narrowed test include (the guards job runs the pins by path); "fail fast" read backwards; job keys with an underscore or a comment; the move that vouched for a later removal; and the canary's comments on when Semgrep scans the base. Each of the 17 bypasses it reported, planted after the fix, was caught; a Dependabot action bump and a new job of T19's kind pass. Since the guard itself stayed outside the pins, CI now also runs `main`'s copy of it (above);
     - noted elsewhere: T19's, T21's and T24's notes; the threat model's supply-chain rows; and, not done here, the CI tools no SHA-256 in this repository pins: mise (`jdx/mise-action` installs the newest release older than 24 hours, checked only against mise's own signed checksums), Node, pnpm and diff-cover.
 
-- [ ] **T19: End-to-end tests**
+- [x] **T19: End-to-end tests**
   - **Does:**
     - Playwright's config, whose `webServer` starts the production build the way `instante start` will:
       - ports `4320` and `4321`, with `ALLOWED_HOST=localhost:4320`;
@@ -524,7 +524,7 @@
       - **osv-scanner and Semgrep in CI only:** `check:full` runs `check:task`, ShellCheck and the end-to-end tests, and says so;
       - **one task, with a shared start-up script,** which changes the production-build gate;
       - **the 90 seconds judged in CI too,** by splitting the slowest test files so Vitest runs them side by side;
-      - the owner declined a second round of questions, so the recommended choice stands for each, and the owner may overturn any: fixture pages in an e2e build for the error screens; Next's own `__NEXT_PROCESSED_ENV` for a checkout's `.env.local`, with a test; the profile's remaining leaks (whether a path exists, sysctl values) recorded in R2 rather than closed; the profile always applied on macOS;
+      - the owner declined a second round of questions, so the recommended choice stands for each, and the owner confirmed each on 2026-11-23: fixture pages in an e2e build for the error screens; Next's own `__NEXT_PROCESSED_ENV` for a checkout's `.env.local`, with a test; the profile's remaining leaks (whether a path exists, sysctl values) recorded in R2 rather than closed; the profile always applied on macOS;
     - decided here: Playwright 1.65.0 and `@axe-core/playwright` 4.14.0, the approved lines, since 1.65.0's browser (Chrome for Testing 158) was 14 days old and 1.65.1's wasn't; the headless shell, as T17a's note says (assert the PDF's blob URL, media type and saved bytes, not its rendering); the backend in test mode, as the platform spec says, so the test routes serve the PDF and the slow route; the new job blocking from its first run, as T18 decided; `global-error.tsx` left to T17a's manual check, since only an error in the root layout itself reaches it;
     - **the shared start-up** (`scripts/prod-build/stack.sh`, sourced by `prod-build-check.sh` and `e2e-stack.sh`, and the commands T22's launcher runs): the pinned Node by its real path, the ports, the scratch home, each process's `env -i` names, and the web app's launch command. `prod-build-check.sh` now also starts the web app without `NEXT_PRIVATE_OUTPUT_TRACE_ROOT` and expects it to stop on the permission model, which shows the spec's claim: without it, Next looks for a workspace root above the checkout (`../pnpm-workspace.yaml`), in a plain checkout as in a worktree;
     - **the profile** (`scripts/prod-build/web.sb`, 46 lines, about 17 rules, hand-written from the study's measured draft): reads in the release, Node, `/usr/lib`, `/System`, the time zone and `/dev/null`; listening on the web port and reaching the backend's; no other port, process or signal (what stays open is in R2). Measured over the whole end-to-end suite under it: Node was refused only DTrace's helper device, the system's log, notifications, account lookups and DNS settings, at start, all harmless and now silent. Node aborts at start (exit 134) when its output is a file the profile doesn't name, so `stack.sh` gives it the logs folder; a pipe needs nothing;
@@ -553,9 +553,9 @@
     - for the owner, after merging: add `e2e` to `main`'s ruleset as a required check, with T18's four (Checkpoint 3 lists them).
 
 ### Checkpoint 3
-- [ ] Every Linux job passes on one pull request (platform spec 3).
-- [ ] The owner's steps from T18 and T19 (the owner's plan, 2026-11-20): `main`'s ruleset requires `production-build`, `shellcheck`, `osv-scanner`, `semgrep` and `e2e`; Dependabot alerts and security updates are on, and Insights → Dependency graph lists `pnpm-lock.yaml`'s packages.
-- [ ] Review session: the document service (T12, T13) and `proxy.ts`'s checks (T14).
+- [x] Every Linux job passes on one pull request (platform spec 3): PR #28, 2026-11-22.
+- [x] The owner's steps from T18 and T19 (the owner's plan, 2026-11-20): `main`'s ruleset requires `production-build`, `shellcheck`, `osv-scanner`, `semgrep` and `e2e`; Dependabot alerts and security updates are on, and Insights → Dependency graph lists `pnpm-lock.yaml`'s packages. Done 2026-11-22. Dependabot's first alert, minimatch 10.2.6 (medium, development only, below the bar; fixed only in 11, which typescript-eslint and ts-morph don't accept yet), stays open by the owner's choice (2026-11-23).
+- [x] Review session: the document service (T12, T13) and `proxy.ts`'s checks (T14): the owner's approvals before each merged (2026-11-15 and 2026-11-16), as at Checkpoint 2.
 
 ## Phase D: The local stack
 
@@ -565,7 +565,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
   - **Does:**
     - `scripts/local/instante` and its library:
       - bash 3.2, `set -u` and `pipefail`;
-      - the home check, using `stat -L -f %d:%i`, with the default home only from inside `releases/` or for the first `setup`;
+      - the home check, using `stat -L -f %d:%i` against `$HOME`'s `.instante` (the owner's choice, 2026-11-23), with the default home only from inside `releases/` or for the first `setup`, and a missing `INSTANTE_HOME` refused if it would be `.instante`, in any letter case, inside `$HOME`;
       - Node found with `mise where` from `/`, its version checked;
       - PostgreSQL from `/opt/homebrew/opt/postgresql@18/bin` with `LC_ALL=C`;
       - the socket-path limits;
@@ -574,13 +574,13 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
       - test mode and the reserved ports;
     - `setup`:
       - takes the lock;
-      - creates the folders and their modes, `repo.git` and the passwords;
+      - asks the owner to type `yes` at the terminal, then creates the folders and their modes, `repo.git` and the 64-character hex passwords;
       - runs `initdb` with the spec's flags, and writes the configuration and `pg_hba.conf`;
       - creates the roles and the database;
       - runs `brew pin`, except in test mode;
       - its final release step comes in T21;
     - `config`;
-    - the macOS job: a pinned runner label, a timeout, superseded runs cancelled, a check for `lockf`, `lsof` and `realpath`, then `setup` in a short scratch home whose path contains a space.
+    - the macOS job: a pinned runner label, a timeout, superseded runs cancelled, a check for `lockf`, `lsof` and `realpath`, Homebrew's `postgresql@18` checked to be major version 18, then `setup` in a short scratch home whose path contains a space.
   - **Acceptance:**
     - `setup` works from nothing;
     - the cluster has no TCP listener and refuses a connection without a password;
@@ -595,7 +595,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
       1. the lock;
       2. the id check;
       3. a fetch from the fixed address, then `merge-base --is-ancestor`;
-      4. the exact commit's check runs from GitHub's public API, every page, refusing on 403, 429 or a missing job;
+      4. the exact commit's check runs from GitHub's public API, every page, refusing on 403, 429 or a missing job; then the latest weekly scan on `main`, printed with the commit it scanned, a warning and never a refusal when it failed (the owner's choice, 2026-11-23);
       5. `git worktree add`, or reuse of a clean kept folder;
       6. install and build, then a dump and `cli db migrate`, with the cluster started with the lock's descriptor closed;
       7. `current` and `releases.log`, with releases beyond the last 3 removed through `git worktree remove`;
@@ -605,7 +605,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
   - **Acceptance:** each refusal in platform spec 14 (the "Instante is running" case tested by holding the lock), and a failed build leaves `current` unchanged.
   - **Verify:** `pnpm test:local release`.
   - **Depends on:** T20. **Files:** `scripts/local/release.sh`, `scripts/local/setup.sh`, `scripts/local/test/{github-stub,release.test}.ts`. **Size:** M.
-  - **Notes from T18:** the required CI jobs, by the names their check runs carry: `install`, `checks`, `production-build`, `guards`, `gitleaks`, `shellcheck`, `osv-scanner` and `semgrep`. `osv-scanner-weekly` runs from its own workflow on `main`'s newest commit, isn't required, and isn't the commit's own CI, so it doesn't decide a release. Whether a release should refuse while the latest weekly scan is failing is open, for the owner. The owner adds the four new names to `main`'s ruleset. `cli db migrate`, which a release runs, starts `pg-boss migrate` as a child (`runPgBossMigrate`, `src/store/queue.ts`) that a signal to `main.ts` doesn't stop, since `ROLE=cli` installs no handler: a deadline on it must stop the child too, or the child keeps its owner connection. T18's review found the same gap in `apps/backend/test/migrate.test.ts`, whose 12-second timeout stops only `main.ts`.
+  - **Notes from T18:** the required CI jobs, by the names their check runs carry: `install`, `checks`, `production-build`, `guards`, `gitleaks`, `shellcheck`, `osv-scanner` and `semgrep`. `osv-scanner-weekly` runs from its own workflow on `main`'s newest commit, isn't required, and isn't the commit's own CI, so it doesn't decide a release. A release warns, never refuses, while the latest weekly scan is failing (the owner's choice, 2026-11-23; step 4 above). The owner adds the four new names to `main`'s ruleset. `cli db migrate`, which a release runs, starts `pg-boss migrate` as a child (`runPgBossMigrate`, `src/store/queue.ts`) that a signal to `main.ts` doesn't stop, since `ROLE=cli` installs no handler: a deadline on it must stop the child too, or the child keeps its owner connection. T18's review found the same gap in `apps/backend/test/migrate.test.ts`, whose 12-second timeout stops only `main.ts`.
   - **Notes from T19:** the required CI jobs add `e2e`. Build the release from a clean environment (`env -i` with the names the build needs), so an `INSTANTE_E2E_PAGES=1` left exported can't add the end-to-end fixture pages, and run `scripts/prod-build/web-sources.ts` on the release's build, which fails on any `page.e2e.tsx`.
 
 - [ ] **T22: `start`, `stop` and `status`**
@@ -661,7 +661,7 @@ All `scripts/local` tests run under the root Vitest project `local` (`pnpm test:
 - [ ] **T25: Guides, runbooks and the link check**
   - **Does:**
     - `docs/guides/development.md`, saying that for `next dev` the web app's `ALLOWED_HOST` and `BACKEND_INTERNAL_URL` go in `apps/web/.env.local` (Next reads env files from the app's folder, not the root), and that changing `BACKEND_INTERNAL_URL` needs `next dev` restarted (T15); and that after a page is deleted, `typecheck` fails on a stale `apps/web/.next/dev/types` until `next dev` runs again or that folder is removed (T17a); from T17b: `pnpm dev` sets the web app's `ALLOWED_HOST` and `BACKEND_INTERNAL_URL` itself (the environment wins over `apps/web/.env.local`, which then matters only for running `next dev` directly); `next dev`'s own endpoints (`/__nextjs_*`, `/_next/mcp`) answer at any `Host`, so only pages and `/api` get `421`, and run directly, `next dev` needs `--inspect-port` set to its own port, as `pnpm dev` gives it, or a page that rebinds its name to `127.0.0.1` can open a debugger in it (threat model); its first page load sends one version check to the npm registry, which no setting turns off; its HMR cache can keep the ping page's server time across a save until a reload; and `.env.example`'s "Copy to .env for development" is wrong, since nothing reads a root `.env`;
-    - `docs/runbooks/local.md`: set up, start, release, roll back, change a secret, Homebrew and macOS upgrades, a lost Mac, a new Mac, the ruleset;
+    - `docs/runbooks/local.md`: set up, start, release, roll back, change a secret, Homebrew and macOS upgrades, a lost Mac, a new Mac, the ruleset, Time Machine to the owner's own disk (R10), and R2's habit: no long-lived secret exported in a terminal while Instante runs;
     - `docs/runbooks/database.md`;
     - the everyday commands in `AGENTS.md` §6;
     - `scripts/check-links.mjs` (Node, no dependency) and its CI step, a check the owner approves with this plan.
@@ -688,7 +688,7 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
       - `docs/runbooks/supabase.md` (the spec's settings, and the steps O2 uses to check refusals);
       - `scripts/supabase-check.sh`, which uses only `curl` and Node, and takes the project URL, key and codes at the terminal;
     - the owner:
-      - creates the development and production projects and applies the settings;
+      - creates the development project and applies the settings (production comes before O2, the owner's choice, 2026-11-23), accepting Supabase's data-processing terms and turning on two-factor sign-in for the Supabase account;
       - creates the owner's user with "Auto confirm" and a random password that isn't saved;
       - runs the script.
   - **Acceptance:** with sign-ups off, the user signs in by emailed code, and the token reaches `aal2` after the authenticator step (accounts spec 1). A failure reopens ADR-004 before any sign-in code exists.
@@ -733,6 +733,7 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
       - wired into `main.ts` with the key cache, in place of the one that refuses every token.
   - **Acceptance:** an unknown `sub` with a matching email gets `403 unknown_account`; a disabled account gets `403`; a changed email is updated and audited.
   - **Verify:** `pnpm --filter @instante/backend test authenticate`.
+  - **Notes:** the owner's choice (2026-11-23): this pull request proposes the store's rules for tables outside `PERSON_TABLES` and `SHARED_TABLES` (`app_user`; `audit_event`, whose `user_id` may be null; later `ai_call`), where cross-person store functions live, how workers make a `PersonId`, and lint bans on the schema outside `store` and `asPersonId` outside `auth`.
   - **Depends on:** A3. **Files:** `migrations/0003_accounts.sql`, `src/store/users.ts`, `src/api/authenticate.ts`, `test/{seed,authenticate.test}.ts`, plus an edit to `src/main.ts`. **Size:** M.
 
 - [ ] **A5: `GET /api/me` and the matrices**
@@ -824,8 +825,9 @@ From A6 on, every test stack (`pnpm dev`, Playwright, the macOS job) runs the fa
 - [ ] **The owner, on the development project:**
   - adds their development user with `pnpm --filter @instante/backend cli users add` against the development database;
   - signs in at `http://localhost:3000`;
-  - checks that a page near token expiry refreshes once and stays signed in (accounts spec 2). Getting near expiry means either waiting about 55 minutes, or lowering the development project's token expiry for the check and setting it back, which is the owner's call.
+  - checks that a page near token expiry refreshes once and stays signed in (accounts spec 2). Getting near expiry means either waiting about 55 minutes, or lowering the development project's token expiry for the check and setting it back; the owner chose to lower it, then set it back to 3,600 seconds (2026-11-23).
 - [ ] **O2, the owner:**
+  - creates the production Supabase project (Canada Central) with the runbook's settings;
   - runs `instante config` with the production project's URL and key, releases the current `main`, and starts Instante;
   - runs `instante cli users add` (accounts spec 7);
   - signs in at `http://instante.localhost:4310` with a code and the authenticator, in each browser the owner uses: the session survives a reload and a browser restart, a page at `http://localhost:3000` can't see its cookies, and `GET /api/me` returns the account (accounts spec 3);

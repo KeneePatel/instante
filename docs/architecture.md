@@ -303,7 +303,7 @@ One master per person ([ADR-008](decisions/ADR-008-master-resume-document.md)). 
     - security clearance and its levels.
 
     A single word such as "visa", "citizen" or "sponsorship" doesn't count on its own.
-  - **The person sees it all:** the master-resume page lists every withheld line and every replaced value, with the reason, so they can rephrase. Whether they may release a withheld line is the owner's call in phase 2.
+  - **The person sees it all:** the master-resume page lists every withheld line and every replaced value, with the reason, so they can rephrase. They can't release a withheld line in v1; they rephrase it instead (decision D4 in [`sdlc.md`](sdlc.md)).
 - **A tailored resume** stores the lines it printed, each with the ids it came from, its placeholders and copies of the source text, so it stays readable after the master changes. Each download is kept as its own file until one is frozen.
 
 ## Flows in detail

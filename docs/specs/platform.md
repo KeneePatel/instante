@@ -273,7 +273,7 @@ Every Instante process, the web server included, starts with `--disable-sigusr1`
 - works on `INSTANTE_HOME`, reads secrets only from files, takes values it can't generate from the terminal (never from arguments), and never evaluates its input;
 - finds Node with `mise where node@<the pinned version>` from `/`, never `mise exec`, and refuses to run unless that Node prints the pinned version;
 - uses PostgreSQL from `/opt/homebrew/opt/postgresql@18/bin`, with `LC_ALL=C`;
-- **chooses its home safely:** it uses the default `~/.instante` only when the script's own real path is inside `~/.instante/releases/`, or when `setup` creates that home for the first time (it mustn't exist yet, and the owner types a confirmation). Any other run must set `INSTANTE_HOME`, which is created if missing and refused if it's the same folder as `~/.instante`, compared with `stat -L -f %d:%i` (APFS ignores case, and paths can differ by a slash, `..` or a link);
+- **chooses its home safely:** it uses the default `~/.instante` only when the script's own real path is inside `~/.instante/releases/`, or when `setup` creates that home for the first time (it mustn't exist yet, and the owner types a confirmation). Any other run must set `INSTANTE_HOME`, which is created if missing and refused if it's the same folder as `~/.instante`, compared with `stat -L -f %d:%i` (APFS ignores case, and paths can differ by a slash, `..` or a link). Here `~` is `$HOME` (the owner's choice, 2026-11-23); the configuration takes its own default from the account's home folder, so where the two differ the backend refuses the reserved ports. An `INSTANTE_HOME` that doesn't exist yet is also refused if it would be a folder named `.instante`, in any letter case, inside `$HOME`, so only the first `setup` creates that folder;
 - checks that `run/documents.sock` fits in 104 bytes and the database's socket path in 103, and stops with a clear message if not;
 - passes passwords to `psql`, `pg_dump` and `pg_restore` through each role's `PGPASSFILE`, never on a command line, and sets passwords with SQL on standard input carrying a SCRAM verifier it computes, so no plain password reaches `ps` or the server's log;
 - runs every `git` command with `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1` and `core.hooksPath=/dev/null`, so the owner's git settings and hooks play no part.
@@ -288,9 +288,9 @@ Every Instante process, the web server included, starts with `--disable-sigusr1`
 | `status`, `config` | | work either way |
 
 The subcommands:
-- **`instante setup`,** run once from a fresh clone, only while `~/.instante` doesn't exist, after the owner types a confirmation:
+- **`instante setup`,** run once from a fresh clone, only while `~/.instante` doesn't exist, after the owner types `yes` at the terminal (the owner's choice, 2026-11-23):
   - creates the folders with mode `0700` (secret files `0600`) and `repo.git`;
-  - generates hex passwords for `instante_admin`, `instante_owner` and `instante_app`, and writes one `PGPASSFILE` and one connection-URL file per role into `secrets/`;
+  - generates 64-character hex passwords (256 bits) for `instante_admin`, `instante_owner` and `instante_app`, and writes one `PGPASSFILE` and one connection-URL file per role into `secrets/`;
   - creates the cluster in `postgres/` with `initdb -U instante_admin --pwfile=secrets/<admin> --auth=scram-sha-256 -E UTF8 --locale-provider=builtin --builtin-locale=C.UTF-8 --locale=C`, then sets `listen_addresses = ''`, `unix_socket_directories` to `run/`, `unix_socket_permissions = 0700`, `timezone` and `log_timezone` to `UTC`, a single `local all all scram-sha-256` rule, and log rotation by weekday;
   - creates `instante_owner` with `CREATEDB`, `instante_app`, and the `instante` database owned by `instante_owner`, from `template0` with the pinned locale;
   - pins `postgresql@18` in Homebrew (`brew pin`), so installing something else can't upgrade it underneath a running cluster; the runbook unpins it for a planned upgrade;
@@ -319,7 +319,7 @@ The subcommands:
   1. the lock;
   2. the id must be 40 hex characters;
   3. with `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_NOSYSTEM=1`, `git fetch` of `main` from the repository's fixed GitHub address into `repo.git`, then `git merge-base --is-ancestor`, accepting only exit 0;
-  4. GitHub's public API, with no token: the commit's check runs, every page of them, must include each required CI job by name, completed with `success`. Any 403, 429 or missing job is a refusal. It prints the commit's subject;
+  4. GitHub's public API, with no token: the commit's check runs, every page of them, must include each required CI job by name, completed with `success`. Any 403, 429 or missing job is a refusal. It prints the commit's subject, and the latest `osv-scanner-weekly` run on `main` with the commit it scanned, warning, never refusing, when that run failed (the owner's choice, 2026-11-23);
   5. `git worktree add releases/<commit>`, then `pnpm install --frozen-lockfile` and `pnpm build`, running that commit's scripts;
   6. a dump, then `cli db migrate` as `instante_owner`;
   7. `current` switches, `releases.log` gets the commit, time, dump, last migration and pg-boss's schema version, and releases beyond the last 3 are removed with `git worktree remove`.
@@ -374,7 +374,7 @@ The subcommands:
   - end-to-end tests with axe (the `e2e` job), against a production build started the way `instante start` starts it. Playwright waits on the backend's `/readyz` rather than a page, since a page needs the right `Host`, and the slow-route test gets its own 45-second timeout. Chromium's headless shell, with Playwright's FFmpeg build, comes from Playwright's own installer, which checks no hash, only the length the server sends (the owner's choice, 2026-11-20);
   - **the local stack, on a GitHub-hosted macOS runner** with a pinned label, a timeout well under 6 hours, and older runs of the same branch cancelled:
     - it checks for `lockf`, `lsof`, `realpath` and `/usr/bin/sandbox-exec`, and that an unprivileged `log stream` works (T24);
-    - then Homebrew's `postgresql@18`;
+    - then Homebrew's `postgresql@18`, unpinned (the owner's choice, 2026-11-23, in the threat model), checked to be major version 18, with its exact version printed;
     - then `setup`, a second `release`, `start`, the checks below, `backup`, `restore`, `rollback` and `stop`, in a short scratch `INSTANTE_HOME` whose path contains a space.
 
   Actions are pinned by commit SHA, and each workflow has least-privilege `permissions`. Dependabot (`.github/dependabot.yml`, npm and GitHub Actions, weekly, with a 7-day cooldown) only proposes: its commits fail `check-commits`, so each update is re-committed as the owner and merged on the owner's yes (AGENTS.md, "Dependency updates").

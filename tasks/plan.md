@@ -73,7 +73,7 @@ O0: repository, ruleset, main = phase-2
   - signs off phase 2;
   - in O0, before T1 (the repository and `main` were done on 2026-11-13):
     - adds the repository's ruleset: deletions restricted, force pushes blocked, nobody may bypass, and each CI job added as a required check once it has first run;
-  - creates the two Supabase projects and runs A1's script;
+  - creates the development Supabase project and runs A1's script, and the production project before O2 (the owner's choice, 2026-11-23);
   - runs O1 and O2 on the Mac, and the development-project check before O2;
   - reviews the line-by-line tasks in the two weekly sessions.
 - **Pushes and merges** follow the owner's standing approval of 2026-11-13 ([`AGENTS.md`](../AGENTS.md)): a merge is a fast-forward after CI passes on the branch, and force pushes or GitHub settings still need the owner's yes.
@@ -111,4 +111,4 @@ The specs' 16 slices (11 for `platform`, 5 for `accounts`) become 37 tasks here 
 
 ## Open questions
 
-None block the plan. The owner's approval included one check the specs don't list: T25's link check in CI (`scripts/check-links.mjs`, Node, no dependency). Before the alpha, not now, the owner decides whether to add Claude Code's sandbox or a separate macOS user for real use (R9).
+None block the plan. The owner's approval included one check the specs don't list: T25's link check in CI (`scripts/check-links.mjs`, Node, no dependency). On 2026-11-23 the owner decided to add neither Claude Code's sandbox nor a separate macOS user for real use, keeping the deny rules (R9).
