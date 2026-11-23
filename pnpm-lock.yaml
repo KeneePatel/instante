@@ -194,8 +194,8 @@ importers:
   apps/backend:
     dependencies:
       '@hono/node-server':
-        specifier: 2.1.6
-        version: 2.1.6(hono@4.13.16)
+        specifier: 2.1.8
+        version: 2.1.8(hono@4.13.18)
       '@instante/contract':
         specifier: workspace:*
         version: link:../../packages/contract
@@ -203,14 +203,14 @@ importers:
         specifier: 0.45.4
         version: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(pg@8.23.1)
       hono:
-        specifier: 4.13.16
-        version: 4.13.16
+        specifier: 4.13.18
+        version: 4.13.18
       pg:
         specifier: 8.23.1
         version: 8.23.1
       pg-boss:
-        specifier: 12.38.1
-        version: 12.38.1(@opentelemetry/api@1.10.0)
+        specifier: 12.38.2
+        version: 12.38.2(@opentelemetry/api@1.10.0)
       pg-connection-string:
         specifier: 2.14.1
         version: 2.14.1
@@ -533,8 +533,8 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@hono/node-server@2.1.6':
-    resolution: {integrity: sha512-p/KH9MnfNcsm3sR6x4lNgm5j+QN4Et8srKredl9DZfXiyZ1UQ3aQ2YVpFLbqktYN5JI+DB+VZFKM2PqE5hLKjQ==}
+  '@hono/node-server@2.1.8':
+    resolution: {integrity: sha512-jdf7FHh6A1lzjpHHQUgxsg2GeER2vMetnAOfeActzcoli6jamlK+NAwL6Dsr5Fl3BS3tYUQzCdtZjU8Qxv7bEA==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4 || ^5.0.0-0
@@ -2114,8 +2114,8 @@ packages:
   hermes-parser@0.25.1:
     resolution: {integrity: sha512-6pEjquH3rqaI6cYAXYPcz9MS4rY6R4ngRgrgfDshRptUZIc3lw0MCIJIGDj9++mfySOuPTHB4nrSW99BCvOPIA==}
 
-  hono@4.13.16:
-    resolution: {integrity: sha512-AOLOEhvrV+iH92xXCnFr/5+3KjPKcI3xP63XJtX5spAnkznPdHijlIsUTpi7/9EhWqrTCekw5c5zh1K+YsVw7A==}
+  hono@4.13.18:
+    resolution: {integrity: sha512-H9q/E1XizaWstJxUW881dmLxEj+t/TrGGnyxINkm4+sK0qUwsMtFdo2BWI9Vs3cIS19MU6b6iCijoUoEf4f3DA==}
     engines: {node: '>=16.9.0'}
 
   human-signals@2.1.0:
@@ -2810,8 +2810,8 @@ packages:
   path-parse@1.0.7:
     resolution: {integrity: sha512-LDJzPVEEEPR+y48z93A0Ed0yXb8pAByGWo/k5YYdYgpY2/2EsOsksJrq7lOHxryrVOn1ejG6oAp8ahvOIQD8sw==}
 
-  pg-boss@12.38.1:
-    resolution: {integrity: sha512-g7zSszWPsakw+Ng5Uqa/DiW8mz8CVnuO17VQ7CXaPsfgFj5Z+wSmP8CBGIgwGB82DNFpdP+wCbt89pal3fwxRQ==}
+  pg-boss@12.38.2:
+    resolution: {integrity: sha512-nvB9hB2cDJGSPUwYjN/Mth+EE3zvxffkp7uKXIiYloMAaxSoEiutmZi9mpSW85hNCcPChf3yicNXdwhIWkv2nA==}
     engines: {node: '>=22.12.0'}
     hasBin: true
     peerDependencies:
@@ -3818,9 +3818,9 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@hono/node-server@2.1.6(hono@4.13.16)':
+  '@hono/node-server@2.1.8(hono@4.13.18)':
     dependencies:
-      hono: 4.13.16
+      hono: 4.13.18
 
   '@humanfs/core@0.19.2':
     dependencies:
@@ -5305,7 +5305,7 @@ snapshots:
     dependencies:
       hermes-estree: 0.25.1
 
-  hono@4.13.16: {}
+  hono@4.13.18: {}
 
   human-signals@2.1.0: {}
 
@@ -5916,7 +5916,7 @@ snapshots:
 
   path-parse@1.0.7: {}
 
-  pg-boss@12.38.1(@opentelemetry/api@1.10.0):
+  pg-boss@12.38.2(@opentelemetry/api@1.10.0):
     dependencies:
       '@opentelemetry/api': 1.10.0
       cron-parser: 5.10.4
